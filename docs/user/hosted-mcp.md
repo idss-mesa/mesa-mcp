@@ -285,6 +285,38 @@ suffix (`/messages/?session_id=…`) the client will POST messages to —
 that's the MCP SDK telling the client where to send subsequent JSON-RPC
 frames.
 
+## Enrolling a project in DuckLake (`mesa_ducklake_init_project`)
+
+Once you're connected, the **`mesa_ducklake_init_project`** tool
+turns any of your iRODS collections into a MESA project — meaning
+every AVU change made through mesa-mcp under that path will be
+mirrored into the project's history catalog with full time-travel
+support.
+
+From a Claude conversation:
+
+> Call `mesa_ducklake_init_project` with `irods_path:
+> /iplant/home/<you>/<your-project>`
+
+That single call:
+
+1. Creates `<irods_path>/.mesa/ducklake/` for the Parquet history
+   files (the catalog's "data plane" lives next to your science data).
+2. Sets `mesa.enabled=true` on the project root as the MESA marker.
+3. Registers the project in the mesa-ducklake catalog so writes have
+   a stable `project_id`.
+
+Idempotent — re-running on an already-enrolled project returns the
+existing project info, no duplicates created. Errors carry stage-
+specific codes (`init_project_failed_root_missing`,
+`init_project_failed_avu_add`, `init_project_failed_catalog_register`,
+…) so it's clear which step needs operator attention.
+
+Requires the hosted mesa-mcp instance to have `Config.ducklake.catalog_dsn`
+configured — local-install setups without a Postgres catalog return
+`ducklake_disabled` and you can run the same tools without history
+recording.
+
 ## Troubleshooting
 
 - **`401 unauthorized` from `/sse` even with a fresh token.** Check

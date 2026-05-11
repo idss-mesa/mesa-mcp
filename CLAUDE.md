@@ -45,7 +45,7 @@ mesa-mcp — patterns we borrow live there, not here.
 | `cyverse/terrain-mcp` | TypeScript (~200 tools wrapping Terrain REST) | Reference for tool *granularity*, encrypted credential storage (AES-256-GCM in `~/.terrain-mcp/`), browser-OAuth flow. We do **not** wrap Terrain — we go native iRODS — but borrow the auth-persistence pattern. |
 | `cyverse-de/formation-mcp` | Go (mcp-go) | Smaller, cleaner example of dual stdio/SSE transport, config-precedence (flag > env > YAML), markdown-formatted tool output, workflows layer for multi-step ops. |
 | `cyverse/esiil-portal` | Django + Python | **Source of the OBO/OLS code we port.** See `portal/services/ols_client.py`, `portal/services/ols_transform.py`, `portal/services/irods_client.py`. Auth is CyVerse Keycloak (OIDC). |
-| `cyverse/mesa-ducklake` | (empty — to be built) | Metadata catalog + history. Postgres catalog, DuckDB compute, files in `/.mesa/ducklake/` per project, AVU time-travel. mesa-mcp is its main writer. |
+| `cyverse/mesa-ducklake` | Python (DuckDB + Postgres + python-irodsclient) | Metadata catalog + history. Postgres catalog, DuckDB compute, Parquet files in `/.mesa/ducklake/` per project, AVU time-travel. Built out: `DuckLakeClient` API + iRODS sync sidecar (push-before-commit + WAL recovery) + `mesa-ducklake recover` CLI + daily `pg_dump`-to-iRODS backup. mesa-mcp is its main writer. |
 
 ## Language & runtime
 
@@ -261,10 +261,16 @@ mesa-mcp's job at the integration boundary:
   `/.mesa/ducklake/` collection, sets ACLs (project owner only by default),
   and registers the project in the Postgres catalog.
 
-mesa-ducklake is empty today — its schema and Python package will be built
-out as a sibling. mesa-mcp depends on it but should keep the dependency
-narrow (a small `DuckLakeClient` interface in `src/mesa_mcp/ducklake/
-client.py`) so the two repos can evolve independently.
+mesa-ducklake is built out (see its own CLAUDE.md for current state).
+mesa-mcp keeps the dependency narrow via the wrapper at
+`src/mesa_mcp/ducklake/client.py`: a process-wide singleton
+`DuckLakeClient`, the `record_avu_change` helper that the AVU-writing
+tools call after a successful iRODS write, and the
+`mesa_ducklake_init_project` MCP tool that bootstraps a project
+(creates `<root>/.mesa/ducklake/`, sets `mesa.enabled=true`,
+registers in the catalog). The two repos can still evolve
+independently — only those entry points are imported across the
+boundary.
 
 ## Resolved architectural decisions
 
@@ -296,10 +302,10 @@ client.py`) so the two repos can evolve independently.
 
 ## Working with this repo
 
-- The repo is empty today (LICENSE + .gitignore + README only). The first
-  PR should bootstrap `pyproject.toml`, the package skeleton, and a minimal
-  MCP server that registers one no-op tool over stdio — proving the
-  transport works — before any iRODS or OLS code lands.
+- The package is built out: full `ds_*` iRODS surface, OLS tool group,
+  `mesa_ducklake_init_project`, OIDC + Streamable HTTP transports, and
+  the `record_avu_change` mirror that pushes AVU changes through
+  mesa-ducklake into iRODS. Tests cover all of that.
 - Don't pre-build features that aren't on the goal list above. The reference
   repos are full of patterns; we want the *relevant* patterns, not a
   faithful port of everything.
