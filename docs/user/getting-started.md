@@ -56,16 +56,15 @@ mesa-mcp reads iRODS credentials in this precedence order (highest wins):
    form, ergonomic for ad-hoc CLI sessions).
 2. `MESA_MCP_IRODS__USER` / `MESA_MCP_IRODS__PASSWORD` (canonical
    double-underscore form, used by env files and MCP-client configs).
-3. The `irods.user` / `irods.password` keys in a YAML config file passed
+3. **`~/.irods/irods_environment.json` + `~/.irods/.irodsA`** —
+   autodetected at stdio startup. If you have already run `iinit`,
+   mesa-mcp picks up your username, zone, host, port, and the
+   descrambled password directly. Honours the standard
+   `IRODS_ENVIRONMENT_FILE` / `IRODS_AUTHENTICATION_FILE` overrides.
+4. The `irods.user` / `irods.password` keys in a YAML config file passed
    via `--config /path/to/config.yaml`.
-4. The defaults — `user=anonymous`, `password=` (empty), which gives
+5. The defaults — `user=anonymous`, `password=` (empty), which gives
    read-only public access.
-
-mesa-mcp does **not** currently load credentials directly from
-`~/.irods/.irodsA` (the scrambled-password file that `iinit` writes).
-Today you copy values out of `~/.irods/irods_environment.json` into env
-vars, and supply the password from somewhere else. Native loading of
-`.irodsA` is tracked as future-work.
 
 The full configuration reference is in [`./configuration.md`](./configuration.md).
 

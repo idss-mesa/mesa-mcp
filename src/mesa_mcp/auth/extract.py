@@ -1,29 +1,36 @@
 """Transport-specific :class:`AuthValue` extractors.
 
-Two extractors live here:
+Three extractors live here:
 
 * :func:`extract_from_env` — used by the stdio transport. The values come from
   the already-loaded :class:`mesa_mcp.config.Config`, which itself respects
-  the ``MESA_MCP_*`` environment variables. This is the *only* path wired up
-  today.
-* :func:`extract_from_headers` — placeholder for the HTTP/SSE transport that
-  arrives with the OIDC PR. The signature is stable so handler code can
-  reference it; the body raises :class:`NotImplementedError` until then.
+  the ``MESA_MCP_*`` environment variables.
+* :func:`extract_from_headers` — HTTP/SSE transport JWT-claim trusted-decode
+  helper. See :mod:`mesa_mcp.transport.oidc` for the verified path.
+* :func:`resolve_credentials` — the chain stdio uses at server start:
+  explicit env vars > ``~/.irods/irods_environment.json`` + ``.irodsA`` >
+  anonymous fallback. This is what lets a VICE pod (or a local install
+  where the user has already run ``iinit``) work without any
+  ``MESA_MCP_*`` env vars.
 
-Both functions return a frozen :class:`AuthValue`; callers should never mutate
-the returned object.
+Both extractor helpers return a frozen :class:`AuthValue`; callers should
+never mutate the returned object.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .models import ANONYMOUS_USER, AuthValue
 
 if TYPE_CHECKING:
     from mesa_mcp.config import Config
+
+logger = logging.getLogger(__name__)
 
 
 def _first_nonempty(*candidates: str | None) -> str | None:
@@ -86,6 +93,107 @@ def extract_from_env(
         proxy_user=env_proxy,
         ticket=env_ticket,
     )
+
+
+def resolve_credentials(
+    config: Config,
+    *,
+    env: Mapping[str, str] | None = None,
+    irods_env_file: Path | None = None,
+    irods_password_file: Path | None = None,
+) -> AuthValue:
+    """Pick the best available credentials for a stdio mesa-mcp process.
+
+    Resolution order (highest wins):
+
+    1. **Explicit ``MESA_MCP_*`` env vars or values already on the
+       loaded ``Config``.** If the operator supplied a username here we
+       honour it directly — they know what they want.
+    2. **``~/.irods/irods_environment.json`` + ``~/.irods/.irodsA``.**
+       Path overrides from ``IRODS_ENVIRONMENT_FILE`` /
+       ``IRODS_AUTHENTICATION_FILE`` are respected. This is the path
+       that makes Mode B (local install) and Mode C (CyVerse VICE app)
+       work without any ``MESA_MCP_*`` boilerplate after ``iinit``.
+    3. **Anonymous** — read-only access to the iRODS zone's public
+       shared collections. Last-resort fallback.
+
+    Parameters
+    ----------
+    config:
+        Loaded :class:`Config`. Used for the default zone and as the
+        fallback source for any field the env file is silent about.
+    env:
+        Optional environment mapping. Defaults to :data:`os.environ`.
+        Useful in tests.
+    irods_env_file, irods_password_file:
+        Optional explicit paths to the iRODS config files. Useful in
+        tests, or when the operator keeps iRODS config outside the
+        default ``~/.irods/`` location.
+
+    Returns
+    -------
+    A frozen :class:`AuthValue` ready to hand to the iRODS client pool.
+    """
+    from .irods_env import extract_from_irods_env_file, load_irods_environment
+
+    source = env if env is not None else os.environ
+
+    # Layer 1: explicit operator-supplied creds win.
+    env_value = extract_from_env(config, env=source)
+    operator_set_user = bool(
+        _first_nonempty(source.get("MESA_MCP_IRODS_USER"))
+        or (config.irods.user and config.irods.user != ANONYMOUS_USER)
+    )
+    operator_set_password = bool(
+        _first_nonempty(source.get("MESA_MCP_IRODS_PASSWORD"))
+        or config.irods.password
+    )
+    if operator_set_user and (operator_set_password or env_value.is_anonymous()):
+        logger.debug(
+            "resolve_credentials: using MESA_MCP_* / config-supplied credentials "
+            "(user=%s, scheme=%s)",
+            env_value.username,
+            env_value.auth_scheme,
+        )
+        return env_value
+
+    # Layer 2: ~/.irods/ files — only attempt if the env file actually exists,
+    # so a missing file doesn't raise on hosts without iinit set up.
+    try:
+        env_data = load_irods_environment(irods_env_file)
+    except FileNotFoundError:
+        env_data = None
+
+    if env_data is not None:
+        try:
+            file_value = extract_from_irods_env_file(
+                env_file=irods_env_file,
+                password_file=irods_password_file,
+                zone_override=config.irods.zone or None,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            logger.warning(
+                "resolve_credentials: ignoring unreadable iRODS env file: %s",
+                exc,
+            )
+        else:
+            logger.debug(
+                "resolve_credentials: using iRODS env file (user=%s, zone=%s, "
+                "scheme=%s)",
+                file_value.username,
+                file_value.zone,
+                file_value.auth_scheme,
+            )
+            return file_value
+
+    # Layer 3: anonymous fallback. Useful for tools that only browse the
+    # public shared zone (e.g. mesa_ols_* read paths that never touch
+    # iRODS at all).
+    logger.info(
+        "resolve_credentials: no MESA_MCP_* env vars, no iRODS env file — "
+        "falling back to anonymous access."
+    )
+    return env_value
 
 
 def extract_from_headers(

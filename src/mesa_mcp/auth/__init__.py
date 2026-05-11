@@ -13,8 +13,13 @@ client pool (:mod:`mesa_mcp.irods.client_pool`) uses to open real sessions.
 
 from __future__ import annotations
 
-from .extract import extract_from_env, extract_from_headers
+from .extract import extract_from_env, extract_from_headers, resolve_credentials
 from .irods_auth import build_account
+from .irods_env import (
+    extract_from_irods_env_file,
+    load_irods_environment,
+    load_irods_password,
+)
 from .models import AuthValue
 
 __all__ = [
@@ -22,4 +27,8 @@ __all__ = [
     "build_account",
     "extract_from_env",
     "extract_from_headers",
+    "extract_from_irods_env_file",
+    "load_irods_environment",
+    "load_irods_password",
+    "resolve_credentials",
 ]

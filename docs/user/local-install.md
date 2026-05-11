@@ -84,28 +84,38 @@ nested-config syntax. The single-underscore aliases
 double-underscore form for `user`/`password` — useful when you want a
 one-line override for an interactive shell session.
 
-### Option 2 — copy out of `~/.irods/irods_environment.json`
+### Option 2 — native `~/.irods/` autodetection (recommended)
 
-If you have already run `iinit`, most of the values live in
-`~/.irods/irods_environment.json`:
+If you have already run `iinit`, mesa-mcp will pick the credentials up
+automatically — **nothing to set, nothing to copy.** At startup the
+stdio transport reads:
+
+* `~/.irods/irods_environment.json` (or whatever `IRODS_ENVIRONMENT_FILE`
+  points at) for `irods_user_name`, `irods_zone_name`, `irods_host`,
+  `irods_port`, and `irods_authentication_scheme`.
+* `~/.irods/.irodsA` (or `IRODS_AUTHENTICATION_FILE`) and descrambles
+  it with python-irodsclient's built-in obfuscation reader.
+
+Resolution chain (highest precedence first):
+
+1. Explicit `MESA_MCP_IRODS_*` env vars from Option 1.
+2. `~/.irods/irods_environment.json` + `.irodsA` autodetection (this option).
+3. Anonymous read-only access to the zone's public shared collection.
+
+This means a typical session is one line:
 
 ```bash
-IRODS_ENV=~/.irods/irods_environment.json
-export MESA_MCP_IRODS__USER=$(jq -r .irods_user_name "$IRODS_ENV")
-export MESA_MCP_IRODS__ZONE=$(jq -r .irods_zone_name "$IRODS_ENV")
-export MESA_MCP_IRODS__HOST=$(jq -r .irods_host "$IRODS_ENV")
-export MESA_MCP_IRODS__PORT=$(jq -r .irods_port "$IRODS_ENV")
-# The password lives in ~/.irods/.irodsA in scrambled form. For now you
-# need the plaintext from CyVerse (or re-run `iinit` and type it). Native
-# support for reading .irodsA is tracked as future-work.
-export MESA_MCP_IRODS__PASSWORD=...
+iinit                                                # once per laptop
+~/.venvs/mesa-mcp/bin/mesa-mcp --transport stdio     # picks up your creds
 ```
 
-**Future-work:** mesa-mcp will read `~/.irods/.irodsA` directly via
-python-irodsclient's built-in scrambled-password support, removing the
-manual plaintext step above. The auth-scheme negotiation already handles
-`native` and `pam` — what is missing is wiring the existing PRC helper
-into the config loader. Track this in the project issues if you need it.
+To point at a non-default location:
+
+```bash
+IRODS_ENVIRONMENT_FILE=/path/to/irods_environment.json \
+IRODS_AUTHENTICATION_FILE=/path/to/.irodsA \
+    ~/.venvs/mesa-mcp/bin/mesa-mcp --transport stdio
+```
 
 ### Option 3 — YAML config file
 

@@ -243,19 +243,45 @@ class MesaServer:
             raise ValueError(f"Unsupported transport: {transport!r}")
 
     async def _serve_stdio(self) -> None:
-        """Bind the MCP server to stdio (the primary supported transport)."""
+        """Bind the MCP server to stdio (the primary supported transport).
+
+        stdio has one user for the lifetime of the process, so we resolve
+        credentials once at startup and bind the auth/config/pool
+        contextvars before entering the MCP loop. Handler invocations
+        spawned inside the loop inherit those values — that is how the
+        ``ds_*`` tools see an :class:`AuthValue` without a per-request
+        middleware.
+        """
         # Lazy imports so the rest of the module — including tests — remains
         # usable when the MCP SDK isn't installed.
         from mcp.server import Server  # type: ignore[import-not-found]
         from mcp.server.stdio import stdio_server  # type: ignore[import-not-found]
 
+        from mesa_mcp.auth.extract import resolve_credentials
+        from mesa_mcp.context import (
+            current_auth_value,
+            current_client_pool,
+            current_config,
+        )
+        from mesa_mcp.irods.client_pool import default_pool
+
+        auth_value = resolve_credentials(self.config)
+        pool = default_pool()
+
+        current_auth_value.set(auth_value)
+        current_client_pool.set(pool)
+        current_config.set(self.config)
+
         mcp_server = self._build_mcp_server(Server)
-        async with stdio_server() as (read_stream, write_stream):
-            await mcp_server.run(
-                read_stream,
-                write_stream,
-                mcp_server.create_initialization_options(),
-            )
+        try:
+            async with stdio_server() as (read_stream, write_stream):
+                await mcp_server.run(
+                    read_stream,
+                    write_stream,
+                    mcp_server.create_initialization_options(),
+                )
+        finally:
+            pool.close()
 
     async def _serve_sse(self) -> None:
         """Run the HTTP/SSE transport with OIDC bearer-token auth.

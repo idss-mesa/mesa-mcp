@@ -78,25 +78,37 @@ The server stays silent (stdio frames only) until a client connects.
 
 The VICE pod always has `~/.irods/irods_environment.json` (with username
 / zone / host / port populated) and `~/.irods/.irodsA` (scrambled
-password). Today you still need to land the password into
-`MESA_MCP_IRODS__PASSWORD` by one of three routes:
+password). mesa-mcp reads both files directly at stdio startup, so the
+**zero-config path** is just:
 
-1. **Re-prompt with `iinit`.** Type your CyVerse password once; copy it
-   into the env var. The plaintext lives only in your shell's memory.
-   Easy, but you re-type on every pod launch.
-2. **Use the scrambled `.irodsA` directly (future-work).** python-iRODSclient
-   already decodes `.irodsA` automatically when a session is constructed
-   without explicit credentials; mesa-mcp does not yet wire that path
-   through its config loader. When it lands, you will be able to leave
-   `MESA_MCP_IRODS__PASSWORD` unset and mesa-mcp will read the scrambled
-   file just like `ils` does. Track this in the project issues if it
-   blocks you.
-3. **Service-account env injection.** Some VICE app configurations bind
+```bash
+~/.venvs/mesa-mcp/bin/mesa-mcp --transport stdio
+```
+
+No env vars to set. If your pod's `iinit` flow has already completed
+(it always has, by the time the JupyterLab / RStudio / Cloud Shell UI
+appears), the loader picks up the username, zone, host, port, and the
+descrambled password automatically. The user-scheme defaults to
+`native`; `pam` is detected from the env file's
+`irods_authentication_scheme` field.
+
+If you need to override:
+
+1. **Point at a different env-file location.** Useful when you've
+   provisioned a per-project iRODS config under, say,
+   `/work/.irods/irods_environment.json`:
+   ```bash
+   IRODS_ENVIRONMENT_FILE=/work/.irods/irods_environment.json \
+   IRODS_AUTHENTICATION_FILE=/work/.irods/.irodsA \
+       ~/.venvs/mesa-mcp/bin/mesa-mcp --transport stdio
+   ```
+2. **Service-account env injection.** Some VICE app configurations bind
    a service identity into the container's environment (for example,
-   automated batch workflows). When that is the case, set
-   `MESA_MCP_IRODS__USER` and `MESA_MCP_IRODS__PASSWORD` from the
-   orchestrator-provided env (`$IRODS_USER_NAME`, etc.) instead of
-   re-running `iinit`.
+   automated batch workflows). Setting `MESA_MCP_IRODS__USER` +
+   `MESA_MCP_IRODS__PASSWORD` overrides the iRODS env-file autodetection.
+3. **Re-prompt with `iinit`.** If `~/.irods/.irodsA` is stale or
+   missing, `iinit` re-writes it and the next mesa-mcp launch picks
+   the fresh password up.
 
 ## What you can access from inside mesa-mcp
 
