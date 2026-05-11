@@ -59,6 +59,14 @@ server:
   # Bind port for non-stdio transports.
   bind_port: 8080
 
+  # Canonical public base URL (no trailing slash). Advertised as the
+  # ``resource`` in the RFC 9728 metadata document at
+  # /.well-known/oauth-protected-resource and used to build the
+  # ``resource_metadata`` URL in 401 WWW-Authenticate challenges.
+  # Leave unset for local-dev; the metadata endpoint will fall back to
+  # rebuilding it from the inbound request's Host + X-Forwarded-Proto.
+  # public_base_url: https://mesa-mcp.example.org
+
   # CyVerse Keycloak OIDC settings, only used when transport != stdio.
   # Leave commented if you only use stdio.
   # oidc_discovery_url: https://kc.cyverse.org/auth/realms/CyVerse/.well-known/openid-configuration

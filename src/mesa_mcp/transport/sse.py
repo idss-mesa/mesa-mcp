@@ -53,6 +53,11 @@ from mesa_mcp.context import current_auth_value, current_config
 
 from .healthz import healthz
 from .oidc import OIDCAuthenticator, OIDCError
+from .wellknown import (
+    PROTECTED_RESOURCE_METADATA_PATH,
+    metadata_url,
+    oauth_protected_resource_metadata,
+)
 
 if TYPE_CHECKING:
     from mesa_mcp.config import Config
@@ -62,12 +67,39 @@ logger = logging.getLogger(__name__)
 
 
 # Path prefixes the OIDC middleware MUST NOT challenge. Everything else
-# requires a valid bearer token.
-_PUBLIC_PREFIXES: tuple[str, ...] = ("/healthz",)
+# requires a valid bearer token. The OAuth protected-resource metadata
+# URL is public by RFC 9728 — clients fetch it *before* they have a token.
+_PUBLIC_PREFIXES: tuple[str, ...] = (
+    "/healthz",
+    PROTECTED_RESOURCE_METADATA_PATH,
+)
 
 
 def _is_public(path: str) -> bool:
     return any(path == p or path.startswith(p + "/") for p in _PUBLIC_PREFIXES)
+
+
+def _www_authenticate(scope: Scope, exc: OIDCError, config: Config) -> str:
+    """Build the ``WWW-Authenticate`` header value for a 401 from the OIDC
+    middleware.
+
+    Follows RFC 6750 §3 (challenge syntax) and RFC 9728 §5 (the
+    ``resource_metadata`` parameter pointing at our protected-resource
+    metadata document, so a compliant MCP client can discover where to
+    fetch an access token).
+    """
+    parts = ['Bearer realm="mesa-mcp"']
+    detail = (exc.detail or "").lower()
+    # "missing" Authorization is *no credentials*, not *bad credentials*,
+    # so we omit the ``error`` parameter per RFC 6750 §3.1 — but we still
+    # advertise where to find the resource metadata.
+    if "missing" not in detail:
+        parts.append('error="invalid_token"')
+        # ``error_description`` is quoted-string; escape embedded quotes.
+        safe = (exc.detail or "").replace("\\", "\\\\").replace('"', '\\"')
+        parts.append(f'error_description="{safe}"')
+    parts.append(f'resource_metadata="{metadata_url(scope, config=config)}"')
+    return ", ".join(parts)
 
 
 class OIDCMiddleware:
@@ -138,9 +170,15 @@ class OIDCMiddleware:
                     zone=self._config.irods.zone,
                 )
             except OIDCError as exc:
+                response_headers: dict[str, str] = {}
+                if exc.status_code == 401:
+                    response_headers["WWW-Authenticate"] = _www_authenticate(
+                        scope, exc, self._config
+                    )
                 response = JSONResponse(
                     {"error": "unauthorized", "detail": exc.detail},
                     status_code=exc.status_code,
+                    headers=response_headers,
                 )
                 await response(scope, receive, send)
                 return
@@ -207,6 +245,11 @@ def build_sse_app(server: MesaServer, config: Config) -> Starlette:
 
     routes = [
         Route("/healthz", endpoint=healthz, methods=["GET"]),
+        Route(
+            PROTECTED_RESOURCE_METADATA_PATH,
+            endpoint=oauth_protected_resource_metadata,
+            methods=["GET"],
+        ),
         Route("/sse", endpoint=handle_sse, methods=["GET"]),
         Mount("/messages/", app=sse_transport.handle_post_message),
     ]

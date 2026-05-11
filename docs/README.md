@@ -15,9 +15,14 @@ read [`../README.md`](../README.md).
 
 mesa-mcp deploys in three modes. Read the one that matches your situation:
 
-- **Want to use mesa-mcp from a hosted service?** A single shared mesa-mcp
-  instance fronted by nginx + OIDC, with several users connecting via
-  bearer tokens. Read [`deploy/overview.md`](./deploy/overview.md).
+- **Want to connect *to* an already-deployed hosted mesa-mcp from your
+  MCP client?** Point Claude Desktop / Claude Code / Claude.ai at a
+  remote URL behind nginx + OIDC. Read
+  [`user/hosted-mcp.md`](./user/hosted-mcp.md).
+- **Want to *operate* a hosted mesa-mcp yourself?** A single shared
+  mesa-mcp instance fronted by nginx + OIDC, with several users
+  connecting via bearer tokens. Read
+  [`deploy/overview.md`](./deploy/overview.md).
 - **Want to install on your laptop and use with Claude Desktop, Claude
   Code, Cline, or Continue?** Local stdio install in a venv on macOS or
   Linux. Read [`user/local-install.md`](./user/local-install.md).
@@ -57,7 +62,9 @@ the relevant pages flag them inline.
 - [Tools reference](./user/tools-reference.md) — every registered tool,
   its input schema, and output shape.
 - [MCP client wiring](./user/claude-desktop.md) — JSON snippets for
-  Claude Desktop, Claude Code, Cline, and Continue.
+  Claude Desktop, Claude Code, Cline, and Continue (stdio / local).
+- [Hosted mesa-mcp](./user/hosted-mcp.md) — connect an MCP client to a
+  remote mesa-mcp service over HTTP/SSE + OIDC.
 - [Examples](./user/examples.md) — end-to-end OBO/OLS-driven metadata
   flow and a ticket-based workflow.
 

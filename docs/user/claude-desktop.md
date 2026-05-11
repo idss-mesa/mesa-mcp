@@ -9,8 +9,9 @@ key names differ.
 
 The HTTP/SSE transport (Mode A) uses a different connection model — the
 client points at a URL and a bearer token rather than launching a
-subprocess. See [`../deploy/http-sse.md`](../deploy/http-sse.md) when
-that mode is what you want.
+subprocess. The end-to-end recipe for that mode lives in
+[`./hosted-mcp.md`](./hosted-mcp.md); the server-side details are in
+[`../deploy/http-sse.md`](../deploy/http-sse.md).
 
 ## Pre-flight
 
@@ -184,6 +185,8 @@ auth anyway).
 
 ## See also
 
+- [Hosted mesa-mcp](./hosted-mcp.md) — connect to a remote mesa-mcp
+  over HTTP/SSE + OIDC instead of launching a stdio subprocess.
 - [Local install](./local-install.md) — Mode B install walkthrough.
 - [VICE app install](./vice-apps.md) — Mode C in-pod install.
 - [Getting started](./getting-started.md)

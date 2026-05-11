@@ -70,6 +70,18 @@ class ServerConfig(BaseModel):
     bind_address: str = "127.0.0.1"
     bind_port: int = 8080
 
+    # Canonical public base URL of this MCP server (no trailing slash) —
+    # e.g. ``https://mesa-mcp.cis240692.projects.jetstream-cloud.org``.
+    # Advertised as the ``resource`` field in the RFC 9728 protected-
+    # resource metadata document at ``/.well-known/oauth-protected-
+    # resource``, and used to build the ``resource_metadata`` URL in the
+    # ``WWW-Authenticate`` header on 401 responses. When unset, the
+    # metadata endpoint reconstructs the value from the inbound request's
+    # ``Host``/``X-Forwarded-Proto`` headers — fine for local development
+    # but should be set explicitly in production so the value is stable
+    # against header spoofing on the loopback bind.
+    public_base_url: str | None = None
+
     # Optional CyVerse Keycloak OIDC settings — only required when serving
     # the HTTP/SSE transport.
     oidc_discovery_url: str | None = None

@@ -1,130 +1,188 @@
 # OIDC (CyVerse Keycloak)
 
-What this page covers: registering a CyVerse Keycloak OIDC client for
-mesa-mcp's planned HTTP/SSE transport, the values to plug into
-`config.yaml` once you have them, and the request to send to CyVerse
-operations to provision the client. OIDC is **only** required for the
-SSE transport — stdio mode does not use bearer tokens. SSE itself is
-not yet implemented; see [HTTP / SSE](./http-sse.md) for the wiring
-status.
+What this page covers: registering CyVerse Keycloak OIDC clients for
+mesa-mcp's HTTP/SSE transport, the values to plug into the running
+configuration, and the requests to send to CyVerse IAM. OIDC is **only**
+required for the SSE transport — stdio mode does not use bearer tokens.
+
+The SSE transport is implemented and in use; see
+[HTTP / SSE](./http-sse.md) for the route map.
 
 ## Who provisions the client
 
 CyVerse Keycloak (`https://kc.cyverse.org/`) is operated by the
 CyVerse infrastructure team. You cannot self-serve client
-registration — open a ticket with CyVerse admin (Tony Edgin / ops)
-asking for a new OIDC client. Include:
+registration — open a ticket with CyVerse IAM asking for a new OIDC
+client.
 
-1. **Client ID** — request `mesa-mcp` (or a tenant-specific id if
-   you're running a private instance: `mesa-mcp-<institute>`).
-2. **Client secret** — Keycloak generates this; CyVerse will hand it
-   back over a secure channel. Treat it as a Tier-1 secret (env var
-   only, never YAML).
-3. **Discovery URL** — `https://kc.cyverse.org/realms/CyVerse/.well-
-   known/openid-configuration` for the public CyVerse realm. If your
-   tenant lives in a private realm, get the realm-scoped URL.
-4. **Redirect URIs** — the URLs mesa-mcp will redirect through after
-   user login. For an SSE deployment behind nginx, these are the
-   public URLs of the mesa-mcp host. Provide all of:
-   - `https://mesa-mcp.example.org/auth/callback` (production).
-   - `http://localhost:8080/auth/callback` (local dev, optional).
-   - Any staging hostnames you intend to support.
+mesa-mcp uses **two** Keycloak clients in production, for two
+different OAuth shapes:
 
-Once provisioned, copy the four values into the per-host config —
-discovery URL and client id can be checked in to `config.yaml`; the
-client secret stays in `/etc/mesa-mcp/env` (root-owned, mode 0600).
+| Client | Type | Grant | Purpose |
+| --- | --- | --- | --- |
+| `mesa-mcp` | confidential | `client_credentials` | Backend identity. mesa-mcp uses this to call CyVerse Terrain's `service-account-*` endpoints, and `mcp-remote` bridges use it to mint short-lived JWTs for stdio-only Claude clients. |
+| `mesa-mcp-public` | public, PKCE-required | `authorization_code` | User-delegated browser flow for Claude.ai's custom-connector UI. |
+
+The confidential `mesa-mcp` client is already provisioned. The public
+`mesa-mcp-public` client is pending the CyVerse IAM request below.
 
 ## Config wiring
 
-The fields live in
+The relevant fields live in
 [`src/mesa_mcp/config.py::ServerConfig`](../../src/mesa_mcp/config.py):
 
 ```yaml
 server:
-  transport: sse                # planned — raises NotImplementedError today
+  transport: sse
   bind_address: 127.0.0.1
   bind_port: 8080
-  oidc_discovery_url: https://kc.cyverse.org/realms/CyVerse/.well-known/openid-configuration
+  # Canonical public URL — surfaced in the RFC 9728 metadata document
+  # and used to build the `resource_metadata` URL on 401 challenges.
+  public_base_url: https://mesa-mcp.example.org
+  oidc_discovery_url: https://kc.cyverse.org/auth/realms/CyVerse/.well-known/openid-configuration
   oauth2_client_id: mesa-mcp
-  # oauth2_client_secret should come from the env, not the YAML file.
+  # oauth2_client_secret comes from the env, not the YAML.
+  # oidc_audience: mesa-mcp     # uncomment for strict aud check
 ```
 
-Companion env-var form (place these in `/etc/mesa-mcp/env`):
+Companion env-var form (place these in `/etc/mesa-mcp/mesa-mcp.env`,
+mode 0640, root:exouser):
 
 ```bash
 MESA_MCP_SERVER__TRANSPORT=sse
-MESA_MCP_SERVER__OIDC_DISCOVERY_URL=https://kc.cyverse.org/realms/CyVerse/.well-known/openid-configuration
+MESA_MCP_SERVER__PUBLIC_BASE_URL=https://mesa-mcp.example.org
+MESA_MCP_SERVER__OIDC_DISCOVERY_URL=https://kc.cyverse.org/auth/realms/CyVerse/.well-known/openid-configuration
 MESA_MCP_SERVER__OAUTH2_CLIENT_ID=mesa-mcp
 MESA_MCP_SERVER__OAUTH2_CLIENT_SECRET=PLEASE_INJECT_FROM_SECRET_STORE
 ```
 
-## Required client settings on the Keycloak side
+The Keycloak adapter JSON file (downloaded from the Keycloak admin
+console after the client is created) is the canonical source for the
+client secret. Stash it at `/etc/mesa-mcp/secrets/oidc-client.json`,
+mode 0640 root:exouser, and extract `credentials.secret` into the env
+file. Never commit either file.
 
-When opening the ticket, ask CyVerse to set the new client up with:
+## Required client settings — confidential `mesa-mcp`
 
-| Setting              | Value                                                  |
-| -------------------- | ------------------------------------------------------ |
-| Client type          | Confidential (server-to-server with client secret).    |
-| Standard flow        | Enabled (Authorization Code).                          |
-| Service accounts     | Enabled if you plan to use proxy-auth (recommended).   |
-| Valid redirect URIs  | As listed above.                                       |
-| Web origins          | `+` (allow CORS from any of the redirect-URI origins). |
-| Access token TTL     | 5–15 minutes (default).                                |
-| Audience             | Include `mesa-mcp` so the JWT `aud` claim matches.     |
+| Setting | Value |
+| --- | --- |
+| Client type | Confidential (server-to-server with client secret). |
+| Standard flow | Off (this client doesn't drive browser auth). |
+| Direct access grants | Off. |
+| Service accounts | **On.** Tokens from this client carry a service-account `sub`. |
+| Client authentication | On. |
+| Valid redirect URIs | None required. |
+| Web origins | Empty. |
+| Access token TTL | 5–15 minutes default; we observed 14400s on the live realm. |
 
-For the standard CyVerse realm, the issuer URL is
-`https://kc.cyverse.org/realms/CyVerse`. The JWKS endpoint and
-authorization/token URLs are discovered automatically via the
-discovery URL.
+For Terrain service-account calls to work, CyVerse IAM must also
+attach the `service-account-*` realm roles relevant to the endpoints
+you plan to use. See the matching memory note: when adding a tool that
+hits a Terrain `service-account-*` Swagger category, flag the role
+need to the user so they can request it.
 
-## How mesa-mcp will use the tokens
+## Required client settings — public `mesa-mcp-public` (pending)
 
-Once the SSE transport lands, the planned flow is:
+| Setting | Value |
+| --- | --- |
+| Client type | **Public** (no client secret). |
+| Standard flow | **On** (Authorization Code). |
+| Direct access grants | Off. |
+| Service accounts | Off. |
+| Client authentication | Off (PKCE replaces the secret). |
+| PKCE method | **S256 required.** |
+| Valid redirect URIs | `https://claude.ai/api/mcp/auth_callback` and `https://claude.com/api/mcp/auth_callback` (both — Claude routes some users through `.com`). |
+| Web origins | `+` (echo redirect URIs) or empty. |
+| Default scopes | `openid`, `profile`, `email`. |
 
-1. Client (e.g. Claude Desktop with an OIDC-enabled MCP launcher)
-   obtains a Keycloak access token for the `mesa-mcp` audience via
-   Authorization Code + PKCE.
-2. Client opens `GET /sse` with `Authorization: Bearer <jwt>`.
-3. mesa-mcp's `extract_from_headers` verifies the JWT signature
-   against the Keycloak JWKS, checks `iss` and `aud`, and extracts
-   the username + iRODS proxy mapping.
-4. The resulting `AuthValue` flows through every tool call in the
-   session, exactly as the stdio path's env-derived `AuthValue` does
-   today.
+mesa-mcp itself does not need to know this client's ID — discovery is
+driven entirely by the RFC 9728 metadata document, which advertises
+the CyVerse Keycloak realm as the authorization server. The
+`mesa-mcp-public` client ID is something users may paste into
+Claude.ai's "Add custom connector → Advanced settings" if Claude.ai
+does not auto-pick it (or use Dynamic Client Registration; see below).
 
-The reference implementation patterns are in
-`irods-mcp-server/common/oauth.go` and
-`esiil-portal/portal/auth/keycloak_oauth.py`. Neither has been ported
-to mesa-mcp yet.
+## How tokens flow through mesa-mcp
 
-## What to give CyVerse operations
+1. MCP client opens `GET /sse` without a token.
+2. mesa-mcp responds `401` with `WWW-Authenticate: Bearer realm="mesa-mcp",
+   resource_metadata="<base>/.well-known/oauth-protected-resource"`.
+3. Compliant clients fetch the metadata document, learn the
+   authorization server (`https://kc.cyverse.org/auth/realms/CyVerse`),
+   and start the OAuth dance — typically PKCE-protected authorization
+   code, opening a browser tab for the Keycloak login.
+4. The client retries `GET /sse` with `Authorization: Bearer <jwt>`.
+5. `OIDCAuthenticator.authenticate` verifies the signature against the
+   realm's JWKS, checks `iss`/`exp`/optional `aud`, and yields an
+   `AuthValue` (`username` from `preferred_username` or `sub`, `zone`
+   from `ServerConfig`).
+6. Every `ds_*` tool downstream reads the `AuthValue` from the
+   request-scoped contextvar.
 
-A request template you can paste into the ticket:
+Server-side details of (2) and (5) live in
+[`transport/sse.py`](../../src/mesa_mcp/transport/sse.py),
+[`transport/wellknown.py`](../../src/mesa_mcp/transport/wellknown.py), and
+[`transport/oidc.py`](../../src/mesa_mcp/transport/oidc.py).
 
-> Hi CyVerse ops,
+## Dynamic Client Registration
+
+The CyVerse realm advertises a registration endpoint
+(`https://kc.cyverse.org/auth/realms/CyVerse/clients-registrations/openid-connect`)
+in its discovery document. If CyVerse IAM has DCR open (or grants an
+initial access token), MCP clients can self-register a fresh PKCE
+client on first connect — no `mesa-mcp-public` pre-registration is
+required.
+
+Whether the endpoint is open, gated, or disabled is part of the
+pending IAM request below.
+
+## Request template for CyVerse IAM
+
+A draft you can paste into a ticket / email. Replace the deployment
+hostname before sending if you are not on the Jetstream2 instance.
+
+> Hi CyVerse IAM team,
 >
-> Could you provision a Keycloak OIDC client for `mesa-mcp`
-> (Python MCP server bridging CyVerse iRODS, OBO/OLS, and DuckLake)?
+> Thanks for setting up the existing `mesa-mcp` Keycloak client. The
+> server is now running at
+> `https://mesa-mcp.cis240692.projects.jetstream-cloud.org` and
+> successfully validates JWTs minted from your realm via the
+> client_credentials flow. Three follow-up asks:
 >
-> - **Client ID:** `mesa-mcp` (or `mesa-mcp-<institute>` if scoping).
-> - **Client type:** Confidential, Standard Flow enabled.
-> - **Realm:** CyVerse public realm.
-> - **Redirect URIs:**
->   - `https://mesa-mcp.example.org/auth/callback`
->   - `http://localhost:8080/auth/callback` (for dev)
-> - **Audience:** include `mesa-mcp`.
-> - **Service accounts:** enabled (we'll use this for proxy auth into
->   iRODS).
+> **1. Status of Dynamic Client Registration.** The realm's discovery
+> doc lists a `registration_endpoint` at
+> `https://kc.cyverse.org/auth/realms/CyVerse/clients-registrations/openid-connect`.
+> Is DCR open, gated by an initial access token, or disabled? If gated,
+> can you issue an initial access token (or document the intended
+> client-policy gate)?
 >
-> Please send the client secret over secure channel. Thanks!
-
-Replace `example.org` and the institute slug with your actual
-hostnames before sending.
+> **2. If DCR is not viable, register `mesa-mcp-public`.** A public
+> PKCE client for user-delegated browser flows from Claude.ai's
+> custom-connector UI. Settings:
+>
+> - Access type: public, no client secret.
+> - Standard flow on; Direct access grants off; Service accounts off.
+> - PKCE required, method S256.
+> - Valid redirect URIs:
+>   - `https://claude.ai/api/mcp/auth_callback`
+>   - `https://claude.com/api/mcp/auth_callback`
+> - Default scopes: `openid`, `profile`, `email`.
+>
+> **3. Service-account roles for the existing `mesa-mcp` client.** The
+> Terrain Swagger at `https://de.cyverse.org/terrain/docs/index.html`
+> exposes `service-account-*` categories. Please attach the matching
+> realm roles to the `mesa-mcp` client's service account for the
+> categories relevant to our tool surface (data-store user lookup,
+> quotas, group introspection to start; happy to enumerate further once
+> we know your role groupings).
+>
+> Thanks!
 
 ## See also
 
-- [HTTP / SSE](./http-sse.md)
+- [HTTP / SSE transport](./http-sse.md)
 - [Nginx + TLS](./nginx-tls.md)
 - [Overview](./overview.md)
+- [Connect to a hosted mesa-mcp](../user/hosted-mcp.md) — client-side recipe.
 - [`../user/configuration.md`](../user/configuration.md)
 - [`../../CLAUDE.md`](../../CLAUDE.md) — Authentication section.

@@ -1,11 +1,12 @@
 # HTTP / SSE transport
 
-What this page covers: the planned HTTP/SSE transport for mesa-mcp,
-why you might want it, and exactly which pieces are already in place
-versus still to be built. **This transport is not implemented today** —
-`mesa-mcp --transport sse` raises `NotImplementedError`. The page
-exists so operators know what the eventual deployment looks like and
-how to prepare.
+What this page covers: the HTTP/SSE transport mesa-mcp serves when run
+with `--transport sse`. The transport is **implemented and in use** —
+the running instance at
+`https://mesa-mcp.cis240692.projects.jetstream-cloud.org` speaks SSE.
+
+For the client-side recipe (Claude Desktop, Claude.ai, etc.), see
+[`../user/hosted-mcp.md`](../user/hosted-mcp.md).
 
 ## Why SSE
 
@@ -19,96 +20,118 @@ machine. SSE matters when:
 - You want centralised audit logging, per-token rate limits, or any
   middleware that doesn't fit in a per-invocation stdio process.
 
-## Current status
+## Routes
 
-The transport selector in
-[`src/mesa_mcp/server.py`](../../src/mesa_mcp/server.py) dispatches
-`--transport sse` to `MesaServer._serve_sse`, which raises
-`NotImplementedError` with the message:
+The Starlette app assembled by
+[`src/mesa_mcp/transport/sse.py::build_sse_app`](../../src/mesa_mcp/transport/sse.py)
+exposes four routes:
 
-> SSE transport is not yet wired up. Use --transport stdio for now;
-> HTTP/SSE arrives with the OIDC auth PR.
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| `GET` | `/healthz` | public | Liveness probe. |
+| `GET` | `/.well-known/oauth-protected-resource` | public | RFC 9728 metadata — points clients at the CyVerse Keycloak realm for OAuth. |
+| `GET` | `/sse` | Bearer JWT | MCP SSE upgrade. First event carries `data: /messages/?session_id=…`. |
+| `POST` | `/messages/?session_id=…` | Bearer JWT | JSON-RPC companion channel for the SSE session. |
 
-The companion auth extractor at
-[`src/mesa_mcp/auth/extract.py::extract_from_headers`](../../src/mesa_mcp/auth/extract.py)
-is similarly stubbed. The signature is stable so handler code can be
-written against it; the body raises `NotImplementedError` until the
-OIDC PR lands.
+A `401` on `/sse` or `/messages/` carries `WWW-Authenticate: Bearer
+realm="mesa-mcp", resource_metadata="<URL of the metadata endpoint>"`
+per RFC 6750 + RFC 9728, so a compliant MCP client (Claude.ai,
+`mcp-remote`, …) can discover the authorization server from a cold
+start.
 
-## What's already in place
+## Bind addresses
 
-- `config.yaml` carries `server.transport`, `server.bind_address`,
-  `server.bind_port`, `server.oidc_discovery_url`,
-  `server.oauth2_client_id`, and `server.oauth2_client_secret`. The
-  Pydantic model accepts these now; the values just are not consumed
-  by an actual transport yet.
-- The MCP Python SDK supports SSE under `mcp.server.sse`. The
-  scaffolding is a thin wrapper analogous to `_serve_stdio`.
+The recommended deployment binds uvicorn to loopback and lets nginx
+terminate TLS:
 
-## What still needs to be built
-
-1. `MesaServer._serve_sse` — bind to `bind_address:bind_port`, wire
-   the MCP SDK's `sse_server` against the same registered tools that
-   stdio uses.
-2. `extract_from_headers` — translate `Authorization: Bearer <jwt>` to
-   an `AuthValue`. Verify the JWT against the Keycloak JWKS, look up
-   (or proxy-auth) the iRODS account, and populate `username`,
-   `zone`, `auth_scheme`, `proxy_user`.
-3. A `/healthz` endpoint distinct from MCP — for systemd / nginx /
-   loadbalancer liveness probes.
-
-The pattern to copy is `irods-mcp-server/common/oauth.go` plus
-`irods-mcp-server`'s SSE setup; the JWT-to-iRODS-account flow already
-lives in `esiil-portal/portal/auth/keycloak_oauth.py`.
-
-## Planned bind addresses
-
-When SSE lands, the recommended deployment is:
-
-- `bind_address = 127.0.0.1` (loopback only).
-- `bind_port = 8080`.
-- nginx reverse-proxies `https://mesa-mcp.example.org/` to
-  `http://127.0.0.1:8080/` with proper SSE buffering off. See
+- `bind_address = 127.0.0.1`
+- `bind_port = 8080`
+- nginx reverse-proxies `https://<host>/` to `http://127.0.0.1:8080/`
+  with `proxy_buffering off` for SSE. See
   [Nginx + TLS](./nginx-tls.md).
 
 Binding mesa-mcp directly to `0.0.0.0:443` is **not** recommended —
 the security hardening, OIDC token handling, and TLS termination are
 all best done in nginx.
 
-## Planned URL routes
+## Auth model
 
-The MCP SDK's SSE server exposes two routes:
+Every non-public request must carry `Authorization: Bearer <JWT>`. The
+JWT is verified by
+[`src/mesa_mcp/transport/oidc.py::OIDCAuthenticator`](../../src/mesa_mcp/transport/oidc.py)
+against the CyVerse Keycloak realm's JWKS, with `iss`, `exp`, and
+(optionally) `aud` checks. A valid token yields an
+[`AuthValue`](../../src/mesa_mcp/auth/models.py) bound to the
+request-scoped contextvar; every `ds_*` tool reads it from there.
 
-- `GET /sse` — SSE event stream. Clients open this with
-  `Authorization: Bearer <token>`.
-- `POST /messages/?session_id=...` — message channel for client → server
-  frames.
+Two practical token shapes:
 
-Both routes will be present once `_serve_sse` is filled in. The
-specific URL paths are determined by the SDK; verify against the
-running build before fronting them in nginx.
+- **`client_credentials`** — backend service identity. Used today by
+  `mcp-remote` bridges from stdio-only clients. The token's `sub` is a
+  Keycloak service-account user, not a human.
+- **`authorization_code` + PKCE** — user-delegated identity. The
+  target shape for Claude.ai's custom-connector flow. Requires a
+  public Keycloak client with PKCE; that registration is in flight
+  with CyVerse IAM (see [OIDC](./oidc.md)).
 
-## OIDC integration
+The auth gate is implemented as a raw ASGI middleware (not Starlette's
+`BaseHTTPMiddleware`) because SSE returns a streaming response that
+`BaseHTTPMiddleware` buffers — which would deadlock long-lived streams.
 
-The transport-level auth is OIDC bearer tokens issued by CyVerse
-Keycloak. The setup work for the IdP side lives in
-[OIDC](./oidc.md). On the mesa-mcp side, set
-`server.oidc_discovery_url`, `server.oauth2_client_id`, and
-`server.oauth2_client_secret` (the last from the env, never YAML).
+### Local-development escape hatch
 
-## What you can do today
+When `ServerConfig.oidc_discovery_url` is empty, the middleware logs a
+loud warning per request and lets every call through with an anonymous
+`AuthValue`. This is intentional so a developer can `curl /healthz`
+against a fresh checkout without wiring Keycloak. **Production
+deployments must set a discovery URL** — leaving it empty in
+`config.yaml` is unsafe in any multi-tenant context.
 
-If you need remote access right now, the workaround is to run
-mesa-mcp behind `ssh -L` (port-forward the stdio process via a
-helper). That's less ergonomic than SSE but works without the
-transport implemented.
+## Protected-resource metadata
+
+`GET /.well-known/oauth-protected-resource` returns an RFC 9728
+document of the form:
+
+```json
+{
+  "resource": "https://mesa-mcp.example.org",
+  "authorization_servers": [
+    "https://kc.cyverse.org/auth/realms/CyVerse"
+  ],
+  "bearer_methods_supported": ["header"],
+  "scopes_supported": []
+}
+```
+
+`resource` comes from `ServerConfig.public_base_url`; when unset, it is
+rebuilt from the inbound request's `Host` + `X-Forwarded-Proto`
+headers. `authorization_servers` is derived by stripping the
+`/.well-known/openid-configuration` suffix from
+`ServerConfig.oidc_discovery_url`.
+
+## Operator checklist
+
+To enable SSE on a fresh host:
+
+1. Set `MESA_MCP_SERVER__TRANSPORT=sse` (or pass `--transport sse`).
+2. Set `MESA_MCP_SERVER__PUBLIC_BASE_URL` to the canonical HTTPS URL.
+3. Set `MESA_MCP_SERVER__OIDC_DISCOVERY_URL` to the realm's discovery
+   URL (e.g. `https://kc.cyverse.org/auth/realms/CyVerse/.well-known/openid-configuration`).
+4. Optionally set `MESA_MCP_SERVER__OIDC_AUDIENCE` to lock tokens to a
+   specific `aud` claim.
+5. Provision the Keycloak client(s) and stash the secret as
+   `MESA_MCP_SERVER__OAUTH2_CLIENT_SECRET`. See [OIDC](./oidc.md).
+6. Restart mesa-mcp and probe the four routes in the table above with
+   `curl`.
 
 ## See also
 
-- [Overview](./overview.md)
-- [OIDC](./oidc.md)
-- [Nginx + TLS](./nginx-tls.md)
-- [`../user/configuration.md`](../user/configuration.md)
+- [Connect to a hosted mesa-mcp](../user/hosted-mcp.md) — client-side
+  recipe for the deployed service.
+- [OIDC](./oidc.md) — Keycloak client provisioning.
+- [Nginx + TLS](./nginx-tls.md) — proxy configuration with SSE-friendly
+  buffering.
+- [Overview](./overview.md) — full deploy topology.
+- [`../user/configuration.md`](../user/configuration.md) — config field
+  reference, including `public_base_url`.
 - [`../../CLAUDE.md`](../../CLAUDE.md) — Authentication section.
-- [`.claude/agents/`](../../.claude/agents/) — there is no specific
-  agent for the SSE transport yet; this is hand-coded work.
