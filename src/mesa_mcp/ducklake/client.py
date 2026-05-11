@@ -82,10 +82,18 @@ def get_default_client() -> Any | None:
         _default_client_initialised = True
         return None
 
-    # ``irods_session`` is required by the real client but only used as an
-    # opaque handle today. We pass ``None`` because per-call code paths
-    # supply their own session.
-    _default_client = _RealClient(postgres_dsn=dsn, irods_session=None)
+    # Per-call sites pass session through to ``record_changes``/read
+    # methods, so the constructor session stays ``None`` here. The
+    # cache configuration is plumbed through so operators can pin a
+    # systemd ``CacheDirectory=`` or raise the cap from YAML.
+    client_kwargs: dict[str, Any] = {
+        "postgres_dsn": dsn,
+        "irods_session": None,
+        "cache_cap_bytes": config.ducklake.cache_cap_bytes,
+    }
+    if config.ducklake.cache_dir:
+        client_kwargs["cache_dir"] = config.ducklake.cache_dir
+    _default_client = _RealClient(**client_kwargs)
     _default_client_initialised = True
     return _default_client
 
@@ -337,6 +345,7 @@ async def record_avu_change(
             actor=auth_value.username,
             changes=[change],
             note=f"{op} AVU via {tool_name}",
+            session=session,
         )
     except Exception as exc:  # noqa: BLE001
         logger.error(

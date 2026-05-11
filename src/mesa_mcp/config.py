@@ -61,6 +61,17 @@ class DuckLakeConfig(BaseModel):
     catalog_dsn: str | None = None
     # iRODS sub-collection (per project) that holds the Parquet data files.
     data_collection: str = ".mesa/ducklake"
+    # Local Parquet cache directory. mesa-ducklake materializes each
+    # snapshot's Parquet here before pushing to iRODS; reads pull
+    # missing files from iRODS back into this cache. When unset,
+    # mesa-ducklake falls back to ``platformdirs.user_cache_dir
+    # ("mesa-ducklake")`` — honors ``XDG_CACHE_HOME`` on Linux and
+    # systemd ``CacheDirectory=`` semantics.
+    cache_dir: str | None = None
+    # Soft cap on total bytes held in ``cache_dir``. After every
+    # successful AVU mirror, files are evicted oldest-first until the
+    # cap is met. ``0`` disables eviction (unbounded). Default 1 GiB.
+    cache_cap_bytes: int = 1 << 30
 
 
 class ServerConfig(BaseModel):
