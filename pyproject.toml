@@ -1,0 +1,75 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mesa-mcp"
+version = "0.1.0"
+description = "MCP server bridging CyVerse iRODS, OBO/OLS ontology services, and DuckLake metadata history."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+    { name = "CyVerse / MESA contributors" },
+]
+keywords = ["mcp", "irods", "cyverse", "ontology", "ols", "ducklake"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "mcp>=1.0",
+    "python-irodsclient>=2.0",
+    "pydantic>=2.6",
+    "pyyaml",
+    "requests",
+    "cachetools",
+    "structlog",
+    "pyjwt[crypto]>=2.10",
+    "httpx>=0.28",
+    "uvicorn>=0.30",
+    "starlette>=0.40",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-mock",
+    "ruff",
+    "mypy",
+    "types-PyYAML",
+    "types-requests",
+]
+
+[project.scripts]
+mesa-mcp = "mesa_mcp.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mesa_mcp"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Sensible defaults; expand later as the codebase grows.
+select = ["E", "F", "I", "UP", "B"]
+ignore = []
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.mypy]
+python_version = "3.11"
+strict_optional = true
+warn_unused_ignores = true
+ignore_missing_imports = true

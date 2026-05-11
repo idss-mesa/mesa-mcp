@@ -1,0 +1,55 @@
+[Unit]
+Description=mesa-mcp — Metadata-Enabled Scientific Agent MCP Server
+Documentation=https://github.com/cyverse/mesa-mcp
+Documentation=file:///home/exouser/mesa-mcp/docs/deploy/systemd.md
+After=network-online.target nss-lookup.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=exouser
+Group=exouser
+WorkingDirectory=/home/exouser/mesa-mcp
+
+# Optional drop-in for environment-only secrets (Keycloak client secret,
+# Postgres DSN, etc.). The `-` prefix means "do not fail if missing" —
+# useful for development where everything is in config.yaml instead.
+EnvironmentFile=-/etc/mesa-mcp/mesa-mcp.env
+
+ExecStart=/home/exouser/mesa-mcp/.venv/bin/mesa-mcp \
+    --config /etc/mesa-mcp/config.yaml \
+    --transport sse
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# Crash-loop protection: restart on failure but don't thrash.
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Logging goes to journald — follow with `journalctl -u mesa-mcp -f`.
+SyslogIdentifier=mesa-mcp
+
+# Security hardening (mirrors esiil-portal.service plus a few extras).
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/exouser/mesa-mcp
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+ProtectClock=yes
+ProtectHostname=yes
+
+[Install]
+WantedBy=multi-user.target

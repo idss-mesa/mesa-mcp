@@ -1,0 +1,73 @@
+# mesa-mcp configuration template.
+#
+# Copy to `config.yaml` and edit. Then start the server with:
+#
+#     mesa-mcp --config config.yaml
+#
+# Precedence (highest wins):  CLI flag  >  environment variable  >  this file
+# Environment variables use the MESA_MCP_ prefix with double-underscore for
+# nesting, e.g. `MESA_MCP_IRODS__HOST=data.cyverse.org`.
+
+# --- iRODS / CyVerse Data Store -------------------------------------------
+irods:
+  # Hostname of the iRODS server (iCAT enabled host or load balancer).
+  host: data.cyverse.org
+  # iRODS port. CyVerse default is 1247.
+  port: 1247
+  # iRODS zone name. CyVerse uses `iplant`.
+  zone: iplant
+  # iRODS user name. Use `anonymous` for read-only public collections.
+  user: anonymous
+  # Password / PAM secret. Leave blank for anonymous access.
+  # NEVER commit a real password to source control. Prefer env var
+  # MESA_MCP_IRODS__PASSWORD or a secret manager.
+  password:
+  # Name of the per-zone "shared" collection. Used by path-allowlist checks.
+  shared_dir_name: shared
+  # Base URL of the CyVerse WebDAV gateway. Used by tools that mint URLs.
+  webdav_url: https://data.cyverse.org/dav/
+  # Whether to use proxy auth (a service account acting on behalf of users).
+  proxy_auth: false
+
+# --- OBO / EMBL-EBI Ontology Lookup Service -------------------------------
+ols:
+  # OLS4 API base URL.
+  base_url: https://www.ebi.ac.uk/ols4/api
+  # Cache TTLs (seconds). The ontology list rarely changes; per-term records
+  # are stable enough for an hour; search results are short-lived.
+  ontology_cache_ttl: 3600
+  term_cache_ttl: 600
+  search_cache_ttl: 60
+  # HTTP request timeout in seconds.
+  request_timeout: 30.0
+
+# --- DuckLake AVU history -------------------------------------------------
+ducklake:
+  # Postgres DSN for the DuckLake catalog. Leave blank to disable AVU-history
+  # mirroring entirely (writes still succeed; they just aren't recorded).
+  # Example: postgresql://mesa:hunter2@localhost:5432/mesa_ducklake
+  catalog_dsn:
+  # iRODS sub-collection (per project root) that holds Parquet data files.
+  data_collection: .mesa/ducklake
+
+# --- Server transport + OIDC ---------------------------------------------
+server:
+  # Wire protocol: `stdio` (default) or `sse` (HTTP/SSE, OIDC-protected).
+  transport: stdio
+  # Bind address for non-stdio transports.
+  bind_address: 127.0.0.1
+  # Bind port for non-stdio transports.
+  bind_port: 8080
+
+  # CyVerse Keycloak OIDC settings, only used when transport != stdio.
+  # Leave commented if you only use stdio.
+  # oidc_discovery_url: https://kc.cyverse.org/auth/realms/CyVerse/.well-known/openid-configuration
+  # oauth2_client_id: mesa-mcp
+  # oauth2_client_secret: REPLACE_ME
+  # Expected ``aud`` claim for inbound bearer JWTs. Leave commented to skip
+  # audience validation. When set, tokens whose `aud` does not match are
+  # rejected with HTTP 401 by the OIDC middleware.
+  # oidc_audience: mesa-mcp
+
+  # Logging verbosity: debug, info, warning, error, critical.
+  log_level: info
