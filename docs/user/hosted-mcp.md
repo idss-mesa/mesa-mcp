@@ -29,30 +29,38 @@ Routes the hosted service exposes:
 | --- | --- | --- |
 | `GET /healthz` | Liveness probe | public |
 | `GET /.well-known/oauth-protected-resource` | RFC 9728 metadata (auth-server discovery) | public |
-| `GET /sse` | MCP Server-Sent Events upgrade | Bearer JWT |
-| `POST /messages/?session_id=…` | MCP JSON-RPC companion | Bearer JWT |
+| `GET /sse` + `POST /messages/?session_id=…` | **Old SSE transport** — for `mcp-remote` bridges (Claude Desktop / Code / Cline / Continue) | Bearer JWT |
+| `POST /mcp` (also `GET`/`DELETE`) | **Streamable HTTP transport** — for Claude.ai's custom-connector UI | Bearer JWT |
 
-A `401` from `/sse` carries a `WWW-Authenticate: Bearer
-resource_metadata="<url>"` header that points compliant MCP clients
-(Claude.ai, mcp-remote, …) at the metadata endpoint so they can
-discover the authorization server and start the OAuth dance
-automatically.
+The two MCP transports coexist on the same Starlette app and behind
+the same OIDC gate. **Pick the URL by your client**:
+
+- `https://mesa-mcp.cis240692.projects.jetstream-cloud.org/sse` for
+  `mcp-remote` bridges.
+- `https://mesa-mcp.cis240692.projects.jetstream-cloud.org/mcp` for
+  Claude.ai's web connector.
+
+A `401` from either endpoint carries `WWW-Authenticate: Bearer ...,
+resource_metadata="<url>"` that points compliant MCP clients at the
+metadata endpoint so they can discover the authorization server.
 
 ## Two ways to connect
 
 There are two paths in active use today. Pick by your client.
 
-| Client | Path | Token source |
-| --- | --- | --- |
-| Claude Desktop | **A** — `mcp-remote` bridge | Manually-minted JWT |
-| Claude Code | **A** — `mcp-remote` bridge | Manually-minted JWT |
-| Cline / Continue | **A** — `mcp-remote` bridge | Manually-minted JWT |
-| Claude.ai (web) | **B** — Custom connector | OAuth via Claude.ai |
+| Client | Path | URL suffix | Token source |
+| --- | --- | --- | --- |
+| Claude Desktop | **A** — `mcp-remote` bridge | `/sse` | Manually-minted JWT |
+| Claude Code | **A** — `mcp-remote` bridge | `/sse` | Manually-minted JWT |
+| Cline / Continue | **A** — `mcp-remote` bridge | `/sse` | Manually-minted JWT |
+| Claude.ai (web) | **B** — Custom connector | `/mcp` | OAuth via Claude.ai |
 
-Path B requires a Keycloak client registered for browser PKCE flows
-with the Claude callback URIs allowlisted. As of this writing the
-request to CyVerse IAM is in flight; the section below describes the
-target state.
+Path B's OAuth flow is implemented on the mesa-mcp side. The final
+production step — registering a public-PKCE Keycloak client with the
+Claude redirect URIs — is in flight with CyVerse IAM. Today, **Path B
+works only if** the CyVerse Keycloak realm has Dynamic Client
+Registration open (Claude.ai self-registers on first use). The
+section below describes the flow.
 
 ---
 
@@ -202,20 +210,37 @@ browser auth.
   emit `WWW-Authenticate: Bearer resource_metadata="…"` so MCP
   clients can self-discover the authorization server.
 
-### Expected setup once the client lands
+### Setup
 
-1. Open Claude.ai → Settings → Connectors → **Add custom connector**.
+1. Open Claude.ai → Settings → Connectors → **Add custom connector**
+   (requires Pro / Team / Enterprise).
 2. **MCP server URL:**
-   `https://mesa-mcp.cis240692.projects.jetstream-cloud.org/sse`.
-3. If Claude.ai auto-discovers everything: just click Connect, complete
-   the CyVerse Keycloak login in the popup, done.
+   `https://mesa-mcp.cis240692.projects.jetstream-cloud.org/mcp`.
+   Note the `/mcp` suffix — Claude.ai speaks Streamable HTTP, not the
+   older SSE transport at `/sse`. Pointing it at `/sse` produces a
+   `401 unauthorized` even after OAuth because the URL shape is wrong.
+3. If Claude.ai auto-discovers everything: click Connect, complete the
+   CyVerse Keycloak login in the popup, done.
 4. If Claude.ai asks for a Client ID / Secret in **Advanced settings:**
    paste the `mesa-mcp-public` client ID (no secret — it is a public
-   client). The actual value will be added here once CyVerse IAM
+   client). The concrete value will be added here once CyVerse IAM
    provisions the client.
 
-This page will be updated with the concrete client ID and any quirks
-discovered in the first end-to-end test.
+### Failure modes you may hit before CyVerse IAM lands the public client
+
+- **Connector add fails immediately, no OAuth tab.** Claude.ai
+  fetched our metadata, tried Dynamic Client Registration against
+  Keycloak, and the realm refused. This is the expected pre-IAM state
+  if DCR is gated. Use Path A in the meantime.
+- **Authorization tab opens but errors after CyVerse login.** Means
+  Claude.ai got a client somehow (via DCR or pre-registration) but
+  the redirect URI isn't on the allowlist for that client. Screenshot
+  the error and pass it to CyVerse IAM with the email in
+  [`../deploy/oidc.md`](../deploy/oidc.md).
+
+This page will be updated with the concrete client ID, any other
+quirks discovered in the first end-to-end test, and the IAM-side
+fixes once they ship.
 
 ---
 
@@ -232,13 +257,27 @@ curl -sS https://mesa-mcp.cis240692.projects.jetstream-cloud.org/healthz
 # server (CyVerse Keycloak) and the canonical resource URL.
 curl -sS https://mesa-mcp.cis240692.projects.jetstream-cloud.org/.well-known/oauth-protected-resource | jq
 
-# Auth challenge — should return 401 with a WWW-Authenticate header.
+# Auth challenge on the old SSE endpoint (mcp-remote uses this).
 curl -sSI https://mesa-mcp.cis240692.projects.jetstream-cloud.org/sse \
   | grep -iE "^(HTTP|WWW-Authenticate)"
 
-# With a token — should hold the SSE stream open. ^C to exit.
+# Auth challenge on the Streamable HTTP endpoint (Claude.ai uses this).
+curl -sSI -X POST \
+  https://mesa-mcp.cis240692.projects.jetstream-cloud.org/mcp \
+  | grep -iE "^(HTTP|WWW-Authenticate)"
+
+# Old SSE with a token — should hold the SSE stream open. ^C to exit.
 curl -sN https://mesa-mcp.cis240692.projects.jetstream-cloud.org/sse \
   -H "Authorization: Bearer $YOUR_JWT"
+
+# Streamable HTTP with a token — minimal initialize. Returns the
+# initialize result + Mcp-Session-Id header.
+curl -sS -X POST \
+  https://mesa-mcp.cis240692.projects.jetstream-cloud.org/mcp \
+  -H "Authorization: Bearer $YOUR_JWT" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
 ```
 
 The first SSE event you see is `event: endpoint` carrying the URL

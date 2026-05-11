@@ -24,20 +24,25 @@ machine. SSE matters when:
 
 The Starlette app assembled by
 [`src/mesa_mcp/transport/sse.py::build_sse_app`](../../src/mesa_mcp/transport/sse.py)
-exposes four routes:
+exposes five routes across two MCP transports plus health/metadata:
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/healthz` | public | Liveness probe. |
-| `GET` | `/.well-known/oauth-protected-resource` | public | RFC 9728 metadata — points clients at the CyVerse Keycloak realm for OAuth. |
-| `GET` | `/sse` | Bearer JWT | MCP SSE upgrade. First event carries `data: /messages/?session_id=…`. |
-| `POST` | `/messages/?session_id=…` | Bearer JWT | JSON-RPC companion channel for the SSE session. |
+| `GET` | `/.well-known/oauth-protected-resource` | public | RFC 9728 metadata — points clients at the CyVerse Keycloak realm. |
+| `GET` | `/sse` | Bearer JWT | **Old SSE transport** upgrade. First event carries `data: /messages/?session_id=…`. Drives `mcp-remote` bridges from stdio-only Claude clients. |
+| `POST` | `/messages/?session_id=…` | Bearer JWT | Companion channel for the old SSE transport. |
+| any | `/mcp` | Bearer JWT | **Streamable HTTP transport** (MCP spec 2025-03-26+) — Claude.ai's custom-connector UI. POST for JSON-RPC; GET for resumable streams; DELETE to close a session. Session keyed by `Mcp-Session-Id` header. |
 
-A `401` on `/sse` or `/messages/` carries `WWW-Authenticate: Bearer
-realm="mesa-mcp", resource_metadata="<URL of the metadata endpoint>"`
-per RFC 6750 + RFC 9728, so a compliant MCP client (Claude.ai,
-`mcp-remote`, …) can discover the authorization server from a cold
-start.
+The two transports coexist intentionally. Claude.ai's web UI speaks
+Streamable HTTP only; existing `mcp-remote` bridges in Claude Desktop /
+Code / Cline / Continue speak old SSE only. Same OIDC middleware
+applies to both.
+
+A `401` on any of the bearer-gated routes carries `WWW-Authenticate:
+Bearer realm="mesa-mcp", resource_metadata="<URL of the metadata
+endpoint>"` per RFC 6750 + RFC 9728, so a compliant MCP client can
+discover the authorization server from a cold start.
 
 ## Bind addresses
 

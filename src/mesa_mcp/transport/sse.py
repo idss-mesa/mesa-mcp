@@ -1,12 +1,17 @@
-"""Starlette application that exposes mesa-mcp over HTTP/SSE.
+"""Starlette application that exposes mesa-mcp over HTTP/SSE + Streamable HTTP.
 
-Three routes are mounted:
+Routes mounted:
 
-* ``GET /sse`` — Server-Sent Events upgrade. Holds the long-lived stream
-  the MCP client reads server messages from.
-* ``POST /messages/`` — companion endpoint the MCP client POSTs JSON-RPC
-  requests to. The session id is carried in the query string.
+* ``GET /sse`` — old-spec SSE upgrade. Holds the long-lived stream
+  ``mcp-remote``-style clients (Claude Desktop, Claude Code, Cline,
+  Continue via bridge) read server messages from.
+* ``POST /messages/?session_id=…`` — companion endpoint for the old-spec
+  SSE transport's client-initiated frames.
+* ``POST /mcp`` (and ``GET``/``DELETE`` for stream and session-close) —
+  Streamable HTTP transport (MCP spec 2025-03-26+). This is what
+  Claude.ai's custom-connector UI speaks.
 * ``GET /healthz`` — unauthenticated liveness probe.
+* ``GET /.well-known/oauth-protected-resource`` — RFC 9728 metadata.
 
 Authentication
 --------------
@@ -36,6 +41,7 @@ mesa-mcp coroutine.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import TYPE_CHECKING
 
@@ -53,6 +59,10 @@ from mesa_mcp.context import current_auth_value, current_config
 
 from .healthz import healthz
 from .oidc import OIDCAuthenticator, OIDCError
+from .streamable_http import (
+    STREAMABLE_HTTP_PATH,
+    build_streamable_http_session_manager,
+)
 from .wellknown import (
     PROTECTED_RESOURCE_METADATA_PATH,
     metadata_url,
@@ -100,6 +110,36 @@ def _www_authenticate(scope: Scope, exc: OIDCError, config: Config) -> str:
         parts.append(f'error_description="{safe}"')
     parts.append(f'resource_metadata="{metadata_url(scope, config=config)}"')
     return ", ".join(parts)
+
+
+class _McpSlashNormalizer:
+    """ASGI middleware: rewrite ``/mcp`` → ``/mcp/`` so the Streamable
+    HTTP Mount serves both forms with no 307 redirect.
+
+    Starlette's :class:`Mount` matches ``/mcp/`` (and ``/mcp/anything``)
+    but not the bare ``/mcp``. With the default ``redirect_slashes=True``
+    it would issue a 307 to add the trailing slash — but some MCP
+    clients (Claude.ai's custom-connector UI included) don't follow POST
+    redirects reliably, so the connector handshake silently fails.
+
+    This middleware sits *outside* the OIDC gate so the rewrite happens
+    before routing or auth. Only the exact path ``/mcp`` is rewritten;
+    everything else (including ``/mcp/``, ``/mcp/foo``, ``/messages``,
+    ``/sse``) passes through unchanged.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope.get("path") == STREAMABLE_HTTP_PATH:
+            scope = dict(scope)
+            scope["path"] = STREAMABLE_HTTP_PATH + "/"
+            # ``raw_path`` is bytes; keep it in sync so middlewares that
+            # prefer it (e.g. uvicorn's access log) report the rewritten
+            # URL. Original-path inspection isn't a use case here.
+            scope["raw_path"] = scope["path"].encode("ascii")
+        await self._app(scope, receive, send)
 
 
 class OIDCMiddleware:
@@ -209,11 +249,20 @@ def _build_authenticator(config: Config) -> OIDCAuthenticator | None:
 
 
 def build_sse_app(server: MesaServer, config: Config) -> Starlette:
-    """Assemble the Starlette app: SSE + healthz + OIDC middleware.
+    """Assemble the Starlette app: SSE + Streamable HTTP + healthz + OIDC.
 
-    The MCP SDK's :class:`SseServerTransport` is mounted at ``/sse`` for
-    the upgrade GET and ``/messages/`` for client POSTs (matching the
-    SDK's example wiring).
+    Two MCP transports coexist on the same app, both behind the same
+    OIDC gate:
+
+    * Old SSE (``/sse`` + ``/messages/``) — driven by the MCP SDK's
+      :class:`SseServerTransport`. Kept for ``mcp-remote`` bridges from
+      stdio-only clients (Claude Desktop, Claude Code, Cline, Continue).
+    * Streamable HTTP (``/mcp``) — driven by the SDK's
+      :class:`StreamableHTTPSessionManager`. The transport Claude.ai's
+      custom-connector UI speaks.
+
+    The session manager is stateful (it tracks ``Mcp-Session-Id``-keyed
+    sessions in memory), so it runs inside a Starlette ``lifespan`` task.
     """
     # Lazy import: the mcp SDK isn't needed for ``import mesa_mcp.transport``.
     from mcp.server.sse import SseServerTransport
@@ -242,6 +291,15 @@ def build_sse_app(server: MesaServer, config: Config) -> Starlette:
         return Response()
 
     authenticator = _build_authenticator(config)
+    streamable_manager = build_streamable_http_session_manager(server)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: Starlette):
+        # ``StreamableHTTPSessionManager.run`` spawns a task group that
+        # owns session lifecycles and cleanup. Must be inside an active
+        # context for ``handle_request`` to function.
+        async with streamable_manager.run():
+            yield
 
     routes = [
         Route("/healthz", endpoint=healthz, methods=["GET"]),
@@ -252,9 +310,23 @@ def build_sse_app(server: MesaServer, config: Config) -> Starlette:
         ),
         Route("/sse", endpoint=handle_sse, methods=["GET"]),
         Mount("/messages/", app=sse_transport.handle_post_message),
+        # ``Mount("/mcp", ...)`` only matches paths *with* a trailing
+        # slash (``/mcp/``, ``/mcp/foo``). For ``/mcp`` exactly,
+        # Starlette would 307-redirect to ``/mcp/`` — some MCP clients
+        # (Claude.ai's connector) don't follow POST redirects reliably.
+        # The :class:`_McpSlashNormalizer` middleware below rewrites
+        # ``/mcp`` to ``/mcp/`` before routing so this Mount serves
+        # both forms with no redirect.
+        Mount(STREAMABLE_HTTP_PATH, app=streamable_manager.handle_request),
     ]
 
     middleware = [
+        # Outermost: normalize the bare ``/mcp`` path to ``/mcp/`` so
+        # the Streamable HTTP Mount serves both forms without redirect.
+        # Must run before OIDC so the auth gate sees the normalized
+        # path (the gate doesn't currently care, but future
+        # path-based policies might).
+        Middleware(_McpSlashNormalizer),
         Middleware(
             OIDCMiddleware,
             authenticator=authenticator,
@@ -262,9 +334,12 @@ def build_sse_app(server: MesaServer, config: Config) -> Starlette:
         ),
     ]
 
-    app = Starlette(routes=routes, middleware=middleware)
+    app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
 
-    # Stash the authenticator on the app so tests and shutdown hooks can
-    # ``aclose`` the HTTP client when they're done.
+    # Stash collaborators on the app so tests and shutdown hooks can
+    # reach them. The authenticator owns an ``httpx.AsyncClient`` that
+    # benefits from explicit ``aclose``; the session manager owns the
+    # in-memory session map.
     app.state.oidc_authenticator = authenticator
+    app.state.streamable_http_session_manager = streamable_manager
     return app
