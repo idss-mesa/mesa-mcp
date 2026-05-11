@@ -1,14 +1,34 @@
 # Deployment overview
 
-What this page covers: the production topology mesa-mcp is built for —
-the components, the data flow, and where each piece runs on the as-
-deployed VM (Ubuntu 24.04, systemd 255, repo at
+What this page covers: the **hosted-service** production topology
+mesa-mcp is built for — the components, the data flow, and where each
+piece runs on the as-deployed VM (Ubuntu 24.04, systemd 255, repo at
 `/home/exouser/mesa-mcp/`). Detailed setup instructions for each
 component live in the sibling pages.
 
-This is a deploy-time snapshot. Today's running mesa-mcp is stdio-only;
-the SSE, OIDC, and DuckLake pieces drawn below are planned but not yet
-shipping — they are marked accordingly.
+## Three deployment modes — this page covers Mode A
+
+mesa-mcp deploys in three modes. **This page covers Mode A: a shared,
+hosted service fronted by nginx + OIDC.** A single mesa-mcp systemd unit
+listens on a local SSE port; nginx terminates TLS and forwards to it;
+CyVerse Keycloak provides per-user bearer tokens. Multiple users connect
+to one mesa-mcp process. The pages in this directory (`systemd`,
+`http-sse`, `oidc`, `nginx-tls`, `postgres`, `monitoring`) all describe
+Mode A artifacts.
+
+For the other two modes, read:
+
+- **Mode B (local on a workstation):** [`../user/local-install.md`](../user/local-install.md).
+  pip-install into a venv on your laptop, run as a stdio subprocess of
+  Claude Desktop / Claude Code / Cline / Continue. No nginx, no OIDC, no
+  systemd unit.
+- **Mode C (inside a CyVerse VICE app):** [`../user/vice-apps.md`](../user/vice-apps.md).
+  pip-install inside a JupyterLab / RStudio / Cloud Shell pod where the
+  user's iRODS credentials are already mounted. Stdio transport, in-pod
+  Claude Code is the natural client.
+
+The topology, component table, and run-mode notes below describe
+**Mode A only**. They do not apply to Modes B or C.
 
 ## Topology
 
@@ -130,5 +150,9 @@ the eventual DuckLake integration regardless of transport.
 - [Nginx + TLS](./nginx-tls.md)
 - [Postgres](./postgres.md)
 - [Monitoring](./monitoring.md)
+- [`../user/local-install.md`](../user/local-install.md) — Mode B on a
+  workstation.
+- [`../user/vice-apps.md`](../user/vice-apps.md) — Mode C inside a
+  CyVerse VICE app.
 - [`../user/configuration.md`](../user/configuration.md)
 - [`../../CLAUDE.md`](../../CLAUDE.md)

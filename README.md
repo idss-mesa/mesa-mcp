@@ -11,6 +11,26 @@ the agent-facing counterpart of the ontology UI in `cyverse/esiil-portal`.
 For the full architecture, conventions, and design decisions, read
 [`CLAUDE.md`](./CLAUDE.md). This README only covers running the scaffold.
 
+## Deployment modes
+
+mesa-mcp ships in three deployment modes. Pick the one that matches your
+situation:
+
+- **Mode A — Hosted service.** A single shared instance runs as a systemd
+  unit behind nginx + Let's Encrypt + CyVerse Keycloak OIDC, and several
+  users connect to it with their own bearer tokens. See
+  [docs/deploy/overview.md](./docs/deploy/overview.md). A live instance is
+  running on `mesa-mcp.cis240692.projects.jetstream-cloud.org`.
+- **Mode B — Local on a workstation.** You `pip install` mesa-mcp into a
+  venv on your laptop and your MCP client (Claude Desktop, Claude Code,
+  Cline, Continue) launches it as a stdio subprocess. No HTTP, no OIDC,
+  no public hostname. See [docs/user/local-install.md](./docs/user/local-install.md).
+- **Mode C — Inside a CyVerse Discovery Environment VICE app.** You launch
+  a JupyterLab, RStudio Server, or Cloud Shell app on
+  [de.cyverse.org](https://de.cyverse.org/) and `pip install` mesa-mcp
+  inside the pod, where your iRODS credentials are already mounted. See
+  [docs/user/vice-apps.md](./docs/user/vice-apps.md).
+
 ## Documentation
 
 Full docs live under [`docs/`](./docs/README.md), split by audience:

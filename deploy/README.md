@@ -5,6 +5,17 @@ long-running service on a Linux host. It is referenced by
 [`../docs/deploy/`](../docs/deploy/) (overview) and the matching
 sub-pages.
 
+**These artifacts apply to Mode A (hosted service) only.** mesa-mcp has
+three deployment modes — see [`../docs/README.md`](../docs/README.md) for
+the framing. The systemd unit, nginx config, and install scripts in this
+directory are needed only when you are standing up a shared, OIDC-fronted
+mesa-mcp service that multiple users connect to. The other two modes
+(Mode B = local workstation install, Mode C = inside a CyVerse VICE app)
+do not use anything here — they install mesa-mcp into a user-owned venv
+and let an MCP client launch it as a stdio subprocess. For those, see
+[`../docs/user/local-install.md`](../docs/user/local-install.md) and
+[`../docs/user/vice-apps.md`](../docs/user/vice-apps.md).
+
 ## Layout
 
 ```
