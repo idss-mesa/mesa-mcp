@@ -133,6 +133,10 @@ from . import ols as _ols_tools  # noqa: E402,F401  (registration side effect)
 # every ``@register_tool`` decorator fires.
 from .irods import tools as _irods_tools  # noqa: E402,F401  (registration side effect)
 
+# And the mesa_ducklake_* surface — same pattern, walks
+# ``mesa_mcp.ducklake.tools`` and fires every ``@register_tool``.
+from .ducklake import tools as _ducklake_tools  # noqa: E402,F401  (registration side effect)
+
 # ---------------------------------------------------------------------------
 # Server adapter
 # ---------------------------------------------------------------------------
