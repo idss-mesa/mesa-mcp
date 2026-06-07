@@ -87,7 +87,7 @@ def get_default_client() -> Any | None:
     # cache configuration is plumbed through so operators can pin a
     # systemd ``CacheDirectory=`` or raise the cap from YAML.
     client_kwargs: dict[str, Any] = {
-        "postgres_dsn": dsn,
+        "catalog_dsn": dsn,
         "irods_session": None,
         "cache_cap_bytes": config.ducklake.cache_cap_bytes,
     }
