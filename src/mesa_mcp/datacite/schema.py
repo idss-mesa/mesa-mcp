@@ -7,66 +7,135 @@ else is optional. Mirrors the role OLS plays for ontology metadata.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class ResourceTypeGeneral(str, Enum):
-    Audiovisual = "Audiovisual"; Book = "Book"; BookChapter = "BookChapter"
-    Collection = "Collection"; ComputationalNotebook = "ComputationalNotebook"
-    ConferencePaper = "ConferencePaper"; ConferenceProceeding = "ConferenceProceeding"
-    DataPaper = "DataPaper"; Dataset = "Dataset"; Dissertation = "Dissertation"
-    Event = "Event"; Image = "Image"; InteractiveResource = "InteractiveResource"
-    Journal = "Journal"; JournalArticle = "JournalArticle"; Model = "Model"
-    OutputManagementPlan = "OutputManagementPlan"; PeerReview = "PeerReview"
-    PhysicalObject = "PhysicalObject"; Preprint = "Preprint"; Report = "Report"
-    Service = "Service"; Software = "Software"; Sound = "Sound"
-    Standard = "Standard"; Text = "Text"; Workflow = "Workflow"; Other = "Other"
+class ResourceTypeGeneral(StrEnum):
+    Audiovisual = "Audiovisual"
+    Book = "Book"
+    BookChapter = "BookChapter"
+    Collection = "Collection"
+    ComputationalNotebook = "ComputationalNotebook"
+    ConferencePaper = "ConferencePaper"
+    ConferenceProceeding = "ConferenceProceeding"
+    DataPaper = "DataPaper"
+    Dataset = "Dataset"
+    Dissertation = "Dissertation"
+    Event = "Event"
+    Image = "Image"
+    InteractiveResource = "InteractiveResource"
+    Journal = "Journal"
+    JournalArticle = "JournalArticle"
+    Model = "Model"
+    OutputManagementPlan = "OutputManagementPlan"
+    PeerReview = "PeerReview"
+    PhysicalObject = "PhysicalObject"
+    Preprint = "Preprint"
+    Report = "Report"
+    Service = "Service"
+    Software = "Software"
+    Sound = "Sound"
+    Standard = "Standard"
+    Text = "Text"
+    Workflow = "Workflow"
+    Other = "Other"
 
 
-class ContributorType(str, Enum):
-    ContactPerson = "ContactPerson"; DataCollector = "DataCollector"
-    DataCurator = "DataCurator"; DataManager = "DataManager"; Distributor = "Distributor"
-    Editor = "Editor"; HostingInstitution = "HostingInstitution"; Producer = "Producer"
-    ProjectLeader = "ProjectLeader"; ProjectManager = "ProjectManager"
-    ProjectMember = "ProjectMember"; RegistrationAgency = "RegistrationAgency"
-    RegistrationAuthority = "RegistrationAuthority"; RelatedPerson = "RelatedPerson"
-    Researcher = "Researcher"; ResearchGroup = "ResearchGroup"
-    RightsHolder = "RightsHolder"; Sponsor = "Sponsor"; Supervisor = "Supervisor"
-    WorkPackageLeader = "WorkPackageLeader"; Other = "Other"
+class ContributorType(StrEnum):
+    ContactPerson = "ContactPerson"
+    DataCollector = "DataCollector"
+    DataCurator = "DataCurator"
+    DataManager = "DataManager"
+    Distributor = "Distributor"
+    Editor = "Editor"
+    HostingInstitution = "HostingInstitution"
+    Producer = "Producer"
+    ProjectLeader = "ProjectLeader"
+    ProjectManager = "ProjectManager"
+    ProjectMember = "ProjectMember"
+    RegistrationAgency = "RegistrationAgency"
+    RegistrationAuthority = "RegistrationAuthority"
+    RelatedPerson = "RelatedPerson"
+    Researcher = "Researcher"
+    ResearchGroup = "ResearchGroup"
+    RightsHolder = "RightsHolder"
+    Sponsor = "Sponsor"
+    Supervisor = "Supervisor"
+    WorkPackageLeader = "WorkPackageLeader"
+    Other = "Other"
 
 
-class DateType(str, Enum):
-    Accepted = "Accepted"; Available = "Available"; Copyrighted = "Copyrighted"
-    Collected = "Collected"; Created = "Created"; Issued = "Issued"
-    Submitted = "Submitted"; Updated = "Updated"; Valid = "Valid"; Withdrawn = "Withdrawn"
+class DateType(StrEnum):
+    Accepted = "Accepted"
+    Available = "Available"
+    Copyrighted = "Copyrighted"
+    Collected = "Collected"
+    Created = "Created"
+    Issued = "Issued"
+    Submitted = "Submitted"
+    Updated = "Updated"
+    Valid = "Valid"
+    Withdrawn = "Withdrawn"
 
 
-class DescriptionType(str, Enum):
-    Abstract = "Abstract"; Methods = "Methods"; SeriesInformation = "SeriesInformation"
-    TableOfContents = "TableOfContents"; TechnicalInfo = "TechnicalInfo"; Other = "Other"
+class DescriptionType(StrEnum):
+    Abstract = "Abstract"
+    Methods = "Methods"
+    SeriesInformation = "SeriesInformation"
+    TableOfContents = "TableOfContents"
+    TechnicalInfo = "TechnicalInfo"
+    Other = "Other"
 
 
-class RelationType(str, Enum):
-    IsCitedBy = "IsCitedBy"; Cites = "Cites"; IsSupplementTo = "IsSupplementTo"
-    IsSupplementedBy = "IsSupplementedBy"; IsContinuedBy = "IsContinuedBy"
-    Continues = "Continues"; IsDescribedBy = "IsDescribedBy"; Describes = "Describes"
-    IsPartOf = "IsPartOf"; HasPart = "HasPart"; IsReferencedBy = "IsReferencedBy"
-    References = "References"; IsDocumentedBy = "IsDocumentedBy"; Documents = "Documents"
-    IsCompiledBy = "IsCompiledBy"; Compiles = "Compiles"; IsVariantFormOf = "IsVariantFormOf"
-    IsDerivedFrom = "IsDerivedFrom"; IsSourceOf = "IsSourceOf"; IsVersionOf = "IsVersionOf"
-    HasVersion = "HasVersion"; IsNewVersionOf = "IsNewVersionOf"; IsObsoletedBy = "IsObsoletedBy"
+class RelationType(StrEnum):
+    IsCitedBy = "IsCitedBy"
+    Cites = "Cites"
+    IsSupplementTo = "IsSupplementTo"
+    IsSupplementedBy = "IsSupplementedBy"
+    IsContinuedBy = "IsContinuedBy"
+    Continues = "Continues"
+    IsDescribedBy = "IsDescribedBy"
+    Describes = "Describes"
+    IsPartOf = "IsPartOf"
+    HasPart = "HasPart"
+    IsReferencedBy = "IsReferencedBy"
+    References = "References"
+    IsDocumentedBy = "IsDocumentedBy"
+    Documents = "Documents"
+    IsCompiledBy = "IsCompiledBy"
+    Compiles = "Compiles"
+    IsVariantFormOf = "IsVariantFormOf"
+    IsDerivedFrom = "IsDerivedFrom"
+    IsSourceOf = "IsSourceOf"
+    IsVersionOf = "IsVersionOf"
+    HasVersion = "HasVersion"
+    IsNewVersionOf = "IsNewVersionOf"
+    IsObsoletedBy = "IsObsoletedBy"
 
 
-class RelatedIdentifierType(str, Enum):
-    DOI = "DOI"; URL = "URL"; URN = "URN"; Handle = "Handle"; ARK = "ARK"
-    ISBN = "ISBN"; ISSN = "ISSN"; PMID = "PMID"; arXiv = "arXiv"; bibcode = "bibcode"
-    IGSN = "IGSN"; PURL = "PURL"; UPC = "UPC"; w3id = "w3id"; EAN13 = "EAN13"
+class RelatedIdentifierType(StrEnum):
+    DOI = "DOI"
+    URL = "URL"
+    URN = "URN"
+    Handle = "Handle"
+    ARK = "ARK"
+    ISBN = "ISBN"
+    ISSN = "ISSN"
+    PMID = "PMID"
+    arXiv = "arXiv"
+    bibcode = "bibcode"
+    IGSN = "IGSN"
+    PURL = "PURL"
+    UPC = "UPC"
+    w3id = "w3id"
+    EAN13 = "EAN13"
 
 
-class NameType(str, Enum):
-    Personal = "Personal"; Organizational = "Organizational"
+class NameType(StrEnum):
+    Personal = "Personal"
+    Organizational = "Organizational"
 
 
 class Creator(BaseModel):
