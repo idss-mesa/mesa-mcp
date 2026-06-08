@@ -211,7 +211,7 @@ def _find_project_root(session: Any, zone: str, irods_path: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Public API: record_avu_change
+# Public API: record_avu_change / record_avu_changes
 # ---------------------------------------------------------------------------
 
 
@@ -229,63 +229,38 @@ class DuckLakeMirrorError(Exception):
         self.__cause__ = cause
 
 
-async def record_avu_change(
+def _resolve_mirror_target(
     *,
     auth_value: AuthValue,
     irods_path: str,
-    target_type: Literal["data_object", "collection"],
-    attribute: str,
-    value: str,
-    unit: str,
-    op: Literal["add", "delete"],
     tool_name: str,
-    session: iRODSSession | None = None,
-) -> None:
-    """Mirror an AVU change into the project's DuckLake, if any.
+    session: Any,
+) -> tuple[Any, Any, str | None] | None:
+    """Shared preamble: resolve (client, project, via_ticket) for AVU mirroring.
 
-    Short-circuits silently when:
+    Returns a ``(client, project, via_ticket)`` tuple when all prerequisites
+    are met, or ``None`` when any short-circuit condition applies (DuckLake
+    disabled, no session, path outside a MESA-enabled project).
 
-    * the config has no ``catalog_dsn`` (DuckLake disabled),
-    * mesa-ducklake isn't importable in this environment, or
-    * the path is not within any MESA-enabled project (no
-      ``mesa.enabled=true`` AVU on a parent collection).
-
-    Populates ``actor`` from ``auth_value.username``, ``source`` as
-    ``f"mesa-mcp:{tool_name}"``, and ``via_ticket`` from
-    ``session.attributes.get('mesa.via_ticket')`` when set.
-
-    Raises :class:`DuckLakeMirrorError` when DuckLake is enabled and the
-    project *is* MESA-enabled but the catalog write itself fails. Callers
-    should translate this into a structured partial-failure response.
+    Raises :class:`DuckLakeMirrorError` if the DuckLake project lookup fails.
     """
     client = get_default_client()
     if client is None:
-        # DuckLake disabled — silent no-op.
-        return
+        return None
 
     if session is None:
-        # Project detection requires a live iRODS session; without one we
-        # can't tell whether the path is inside a MESA project. Treat as
-        # "not MESA-enabled" and return — the caller has already written
-        # the AVU to iRODS so we can't undo, and the user wanted that
-        # write to succeed.
         logger.debug(
             "record_avu_change.no_session",
             irods_path=irods_path,
             tool_name=tool_name,
             message="No iRODS session supplied; skipping MESA project detection.",
         )
-        return
+        return None
 
     project_root = _find_project_root(session, auth_value.zone, irods_path)
     if project_root is None:
-        # Not a MESA-enabled project — silent no-op (this is the documented
-        # "exception" case in the design: project not MESA-enabled => no
-        # exception, just a skip).
-        return
+        return None
 
-    # Look up or register the project. ``find_project_by_path`` is the
-    # documented way to map a path to a project_id in mesa-ducklake.
     try:
         project = client.find_project_by_path(project_root)
         if project is None:
@@ -322,6 +297,49 @@ async def record_avu_change(
             except Exception:  # noqa: BLE001
                 via_ticket = None
 
+    return (client, project, via_ticket)
+
+
+async def record_avu_change(
+    *,
+    auth_value: AuthValue,
+    irods_path: str,
+    target_type: Literal["data_object", "collection"],
+    attribute: str,
+    value: str,
+    unit: str,
+    op: Literal["add", "delete"],
+    tool_name: str,
+    session: iRODSSession | None = None,
+) -> None:
+    """Mirror an AVU change into the project's DuckLake, if any.
+
+    Short-circuits silently when:
+
+    * the config has no ``catalog_dsn`` (DuckLake disabled),
+    * mesa-ducklake isn't importable in this environment, or
+    * the path is not within any MESA-enabled project (no
+      ``mesa.enabled=true`` AVU on a parent collection).
+
+    Populates ``actor`` from ``auth_value.username``, ``source`` as
+    ``f"mesa-mcp:{tool_name}"``, and ``via_ticket`` from
+    ``session.attributes.get('mesa.via_ticket')`` when set.
+
+    Raises :class:`DuckLakeMirrorError` when DuckLake is enabled and the
+    project *is* MESA-enabled but the catalog write itself fails. Callers
+    should translate this into a structured partial-failure response.
+    """
+    resolved = _resolve_mirror_target(
+        auth_value=auth_value,
+        irods_path=irods_path,
+        tool_name=tool_name,
+        session=session,
+    )
+    if resolved is None:
+        return
+
+    client, project, via_ticket = resolved
+
     # Build the AvuChange. Imported here so the module is usable when
     # mesa-ducklake isn't installed (the get_default_client call above
     # would have returned None already in that case).
@@ -355,6 +373,95 @@ async def record_avu_change(
             tool_name=tool_name,
             op=op,
             attribute=attribute,
+            error=str(exc),
+        )
+        raise DuckLakeMirrorError(
+            f"DuckLake write failed for project {project.project_id}: {exc}",
+            project_id=project.project_id,
+            cause=exc,
+        ) from exc
+
+
+async def record_avu_changes(
+    *,
+    auth_value: AuthValue,
+    irods_path: str,
+    target_type: Literal["data_object", "collection"],
+    changes: list[tuple[str, str, str, Literal["add", "delete"]]],
+    tool_name: str,
+    session: iRODSSession | None = None,
+) -> None:
+    """Mirror MANY AVU changes for ONE iRODS path as a SINGLE DuckLake snapshot.
+
+    This is the bulk counterpart of :func:`record_avu_change`. It writes all
+    ``changes`` as one ``record_changes`` call (one Parquet file / snapshot)
+    instead of one call per AVU, cutting per-object iRODS round-trips by ~N×.
+
+    Parameters
+    ----------
+    auth_value:
+        Authenticated caller identity.
+    irods_path:
+        The iRODS logical path that was tagged (data object or collection).
+    target_type:
+        ``"data_object"`` or ``"collection"``.
+    changes:
+        List of ``(attribute, value, unit, op)`` tuples describing every AVU
+        that was written.  An empty list is a no-op.
+    tool_name:
+        Name of the calling MCP tool (used in provenance and log messages).
+    session:
+        Live ``iRODSSession`` for project detection; ``None`` → no-op.
+
+    Raises :class:`DuckLakeMirrorError` when DuckLake is enabled and the
+    project *is* MESA-enabled but the catalog write fails.
+    """
+    if not changes:
+        return
+
+    resolved = _resolve_mirror_target(
+        auth_value=auth_value,
+        irods_path=irods_path,
+        tool_name=tool_name,
+        session=session,
+    )
+    if resolved is None:
+        return
+
+    client, project, via_ticket = resolved
+
+    from mesa_ducklake.models import AvuChange  # type: ignore[import-not-found]
+
+    avu_changes = [
+        AvuChange(
+            irods_path=irods_path,
+            target_type=target_type,
+            attribute=attribute,
+            value=value,
+            unit=unit,
+            op=op,
+            actor=auth_value.username,
+            source=f"mesa-mcp:{tool_name}",
+            via_ticket=via_ticket,
+        )
+        for attribute, value, unit, op in changes
+    ]
+
+    try:
+        client.record_changes(
+            project_id=project.project_id,
+            actor=auth_value.username,
+            changes=avu_changes,
+            note=f"batch {len(changes)} AVUs via {tool_name}",
+            session=session,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "record_avu_changes.write_failed",
+            irods_path=irods_path,
+            project_id=str(project.project_id),
+            tool_name=tool_name,
+            n_changes=len(changes),
             error=str(exc),
         )
         raise DuckLakeMirrorError(
