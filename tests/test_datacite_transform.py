@@ -43,3 +43,22 @@ def test_canonical_avus_scalars_and_indexed():
     assert ("datacite.subject.1.value", "Brassica") in pairs
     assert ("datacite.subject.2.value", "Phenotyping") in pairs
     assert all(a["unit"] == "" for a in avus)
+
+
+def test_cyverse_template_naming_joins_repeatables():
+    avus = datacite_to_avus(_rec(), naming="cyverse_template")
+    pairs = {(a["attribute"], a["value"]) for a in avus}
+    assert ("datacite.title", "U.Nottm_2016_RIPRleaf_images") in pairs
+    assert ("datacite.creator", "Alcock, Thomas") in pairs
+    assert ("creatorAffiliation", "University of Nottingham") in pairs
+    assert ("datacite.resourcetype", "Image") in pairs  # general -> legacy resourcetype
+    assert ("ResourceType", "leaf phenotyping") in pairs
+    assert ("Subject", "Brassica, Phenotyping") in pairs  # repeatables joined
+    assert ("identifierType", "DOI") in pairs
+
+
+def test_both_is_superset():
+    a = {(x["attribute"], x["value"]) for x in datacite_to_avus(_rec(), naming="canonical")}
+    b = {(x["attribute"], x["value"]) for x in datacite_to_avus(_rec(), naming="cyverse_template")}
+    both = {(x["attribute"], x["value"]) for x in datacite_to_avus(_rec(), naming="both")}
+    assert a <= both and b <= both
