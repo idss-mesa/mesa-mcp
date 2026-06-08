@@ -62,3 +62,17 @@ def test_both_is_superset():
     b = {(x["attribute"], x["value"]) for x in datacite_to_avus(_rec(), naming="cyverse_template")}
     both = {(x["attribute"], x["value"]) for x in datacite_to_avus(_rec(), naming="both")}
     assert a <= both and b <= both
+
+
+def test_canonical_round_trip():
+    from mesa_mcp.datacite.transform import avus_to_datacite
+
+    rec = _rec()
+    back = avus_to_datacite(datacite_to_avus(rec, naming="canonical"))
+    assert back.identifier == rec.identifier
+    assert back.titles == rec.titles
+    assert back.publicationYear == rec.publicationYear
+    assert back.resourceTypeGeneral == rec.resourceTypeGeneral
+    assert [c.name for c in back.creators] == [c.name for c in rec.creators]
+    assert back.creators[0].nameIdentifier == "0000-0001-2345-6789"
+    assert [s.value for s in back.subjects] == ["Brassica", "Phenotyping"]
