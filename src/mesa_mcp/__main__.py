@@ -65,7 +65,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # Imports are deferred so that --help / --version work without pulling in
     # the heavy MCP, iRODS, and DuckLake dependency graphs.
-    from .config import load_config
+    from .config import load_config, set_active_config
     from .logging import setup_logging
     from .server import run
 
@@ -76,6 +76,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     flag_overrides = {k: v for k, v in flag_overrides.items() if v is not None}
 
     config = load_config(args.config, flag_overrides=flag_overrides)
+    set_active_config(config)
     setup_logging(config.server.log_level, transport=config.server.transport)
     run(config, transport=config.server.transport)
     return 0

@@ -61,9 +61,9 @@ def get_default_client() -> Any | None:
         return _default_client
 
     # Lazy config import to dodge circular dependencies at module load time.
-    from mesa_mcp.config import load_config
+    from mesa_mcp.config import get_active_config
 
-    config = load_config()
+    config = get_active_config()
     dsn = config.ducklake.catalog_dsn
     if not dsn:
         _default_client = None

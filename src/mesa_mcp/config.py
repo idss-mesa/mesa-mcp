@@ -230,3 +230,32 @@ def load_config(
     merged = _deep_merge(merged, flag_layer)
 
     return Config.model_validate(merged)
+
+
+# ---------------------------------------------------------------------------
+# Process-wide active config
+# ---------------------------------------------------------------------------
+# The entrypoint resolves config once with full precedence (flag > env > YAML)
+# and records it here via set_active_config(). Lazily-initialized consumers
+# (e.g. the DuckLake client) read it through get_active_config() so they see the
+# SAME resolved config — including the --config YAML — instead of re-loading
+# without the file path.
+_active_config: Config | None = None
+
+
+def set_active_config(config: Config | None) -> None:
+    """Record (or clear) the process-wide resolved config. Called by the entrypoint."""
+    global _active_config
+    _active_config = config
+
+
+def get_active_config() -> Config:
+    """Return the active config set by the entrypoint.
+
+    Falls back to ``load_config()`` (env vars + built-in defaults, no YAML) when
+    no active config has been set — e.g. in unit tests or headless embedders that
+    never went through the CLI entrypoint.
+    """
+    if _active_config is not None:
+        return _active_config
+    return load_config()
