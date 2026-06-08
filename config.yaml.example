@@ -43,9 +43,14 @@ ols:
 
 # --- DuckLake AVU history -------------------------------------------------
 ducklake:
-  # Postgres DSN for the DuckLake catalog. Leave blank to disable AVU-history
+  # DSN for the DuckLake catalog. Leave blank to disable AVU-history
   # mirroring entirely (writes still succeed; they just aren't recorded).
-  # Example: postgresql://mesa:hunter2@localhost:5432/mesa_ducklake
+  # The backend is chosen automatically from the DSN scheme:
+  #   - Postgres  (concurrent / hosted, multi-writer):
+  #       postgresql://mesa:hunter2@localhost:5432/mesa_ducklake
+  #   - DuckDB file (single-user / local-install, no external database;
+  #     single-writer — one process holds the file lock at a time):
+  #       duckdb:///absolute/path/to/catalog.duckdb
   catalog_dsn:
   # iRODS sub-collection (per project root) that holds Parquet data files.
   data_collection: .mesa/ducklake
