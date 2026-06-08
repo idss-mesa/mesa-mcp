@@ -1,7 +1,10 @@
 import pytest
 from pydantic import ValidationError
+
 from mesa_mcp.datacite.schema import (
-    Creator, Subject, ResourceTypeGeneral, DescriptionType, DataCiteMetadata,
+    Creator,
+    DataCiteMetadata,
+    ResourceTypeGeneral,
 )
 
 

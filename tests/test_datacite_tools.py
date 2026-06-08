@@ -76,3 +76,20 @@ def test_apply_datacite_rejects_invalid(monkeypatch):
         asyncio.run(handle_apply_datacite(
             ApplyDataCiteInput(target="/iplant/home/tswetnam/proj", record=bad),
             auth_value=auth))
+
+
+def test_export_tool_emits_xml():
+    from mesa_mcp.datacite.tools.export import ExportInput, handle_datacite_export
+
+    avus = [
+        {"attribute": "datacite.identifier", "value": "10.25739/xyz"},
+        {"attribute": "datacite.identifierType", "value": "DOI"},
+        {"attribute": "datacite.title.1.value", "value": "T"},
+        {"attribute": "datacite.creator.1.name", "value": "Alcock, Thomas"},
+        {"attribute": "datacite.publisher", "value": "CyVerse"},
+        {"attribute": "datacite.publicationYear", "value": "2016"},
+        {"attribute": "datacite.resourceTypeGeneral", "value": "Image"},
+    ]
+    res = asyncio.run(handle_datacite_export(ExportInput(avus=avus, format="xml")))
+    assert "http://datacite.org/schema/kernel-4" in res["document"]
+    assert "10.25739/xyz" in res["document"]

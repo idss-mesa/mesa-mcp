@@ -153,6 +153,26 @@ rule input are still validated against the user's accessible paths.
 - `mesa_avu_apply_term` — composite: pick a term, supply a value, write the
   AVU to a CyVerse path, and emit a DuckLake change record
 
+### Group 2b — DataCite descriptive metadata
+
+- `mesa_datacite_template` — return the DataCite 4.x field scaffold (mandatory/
+  repeatable flags, controlled-vocabulary lists) to drive form-based record entry
+- `mesa_avu_apply_datacite` — validate a DataCite 4.x record dict and bulk-write
+  it to an iRODS path as AVUs, then mirror one DuckLake snapshot
+- `mesa_datacite_validate` — check a set of AVUs for completeness against the
+  DataCite 4.x kernel; report missing mandatory fields and whether the record is
+  DOI-ready
+- `mesa_datacite_export` — rebuild a DataCite record from AVUs and emit kernel-4
+  XML (for DataCite DOI registration) or REST JSON
+
+**Canonical AVU naming:** simple scalars use `datacite.<field>` (e.g.
+`datacite.publisher`); repeatable or structured fields use indexed sub-fields:
+`datacite.creator.1.name`, `datacite.creator.1.affiliation`,
+`datacite.creator.1.nameIdentifier`, `datacite.subject.1.value`, etc.
+The `LEGACY_CROSSWALK` dict in `schema.py` maps CyVerse DOI-request CSV column
+names (e.g. `creatorAffiliation`, `ResourceType`, `Subject`) to canonical kernel
+field names so legacy template data can be round-tripped or migrated.
+
 ### Group 3 — DuckLake integration (calls into `mesa-ducklake`)
 
 
