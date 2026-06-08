@@ -124,18 +124,13 @@ async def handle_ds_ping(args: DsPingInput) -> dict[str, Any]:
     }
 
 
-# Side-effect import: pulling in mesa_mcp.ols runs every @register_tool in the
-# OLS tool package, populating the registry before MesaServer is constructed.
+# Side-effect imports: each package walks its own directory with pkgutil and
+# imports every .py file, firing every @register_tool decorator.
+import mesa_mcp.datacite.tools  # noqa: E402,F401  (auto-registers DataCite tools)
+
 from . import ols as _ols_tools  # noqa: E402,F401  (registration side effect)
-
-# Same trick for the ds_* iRODS tool surface. Touching ``mesa_mcp.irods.tools``
-# walks the package with ``pkgutil`` and imports each ``.py`` file there, so
-# every ``@register_tool`` decorator fires.
-from .irods import tools as _irods_tools  # noqa: E402,F401  (registration side effect)
-
-# And the mesa_ducklake_* surface — same pattern, walks
-# ``mesa_mcp.ducklake.tools`` and fires every ``@register_tool``.
 from .ducklake import tools as _ducklake_tools  # noqa: E402,F401  (registration side effect)
+from .irods import tools as _irods_tools  # noqa: E402,F401  (registration side effect)
 
 # ---------------------------------------------------------------------------
 # Server adapter
