@@ -48,6 +48,7 @@ from jwt.exceptions import (
     MissingRequiredClaimError,
 )
 
+from mesa_mcp.auth.claims import KeycloakClaims
 from mesa_mcp.auth.models import AuthValue
 
 logger = logging.getLogger(__name__)
@@ -237,16 +238,26 @@ class OIDCAuthenticator:
         except (DecodeError, InvalidTokenError) as exc:
             raise OIDCError(f"invalid token: {exc}", status_code=401) from exc
 
-        username = claims.get("preferred_username") or claims.get("sub")
+        parsed = KeycloakClaims.from_payload(claims)
+
+        # Service-account tokens authenticate a *client*, not a person.
+        # Rejecting them here is the difference between a clear 401 and a
+        # confusing failure deep in iRODS: the "service-account-<client>"
+        # string would otherwise be used as an iRODS username and ACLs
+        # would be evaluated against a principal that does not exist.
+        if parsed.is_service_account:
+            raise OIDCError(
+                "service accounts are not supported; connect with a user "
+                "account",
+                status_code=401,
+            )
+
+        username = parsed.username()
         if not username:
             raise OIDCError(
                 "token has neither preferred_username nor sub",
                 status_code=401,
             )
-        # CyVerse usernames sometimes arrive with a realm suffix
-        # (``alice@CyVerse``); strip to match the iRODS username form.
-        if "@" in username:
-            username = username.split("@", 1)[0]
 
         return AuthValue(
             username=username,

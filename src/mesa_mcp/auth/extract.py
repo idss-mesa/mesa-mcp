@@ -25,6 +25,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .claims import KeycloakClaims
 from .models import ANONYMOUS_USER, AuthValue
 
 if TYPE_CHECKING:
@@ -244,11 +245,12 @@ def extract_from_headers(
     except _jwt.InvalidTokenError as exc:
         raise ValueError(f"could not decode JWT: {exc}") from exc
 
-    username = claims.get("preferred_username") or claims.get("sub")
+    parsed = KeycloakClaims.from_payload(claims)
+    if parsed.is_service_account:
+        raise ValueError("service accounts are not supported; use a user account")
+    username = parsed.username()
     if not username:
         raise ValueError("JWT has neither preferred_username nor sub claim")
-    if "@" in username:
-        username = username.split("@", 1)[0]
 
     return AuthValue(
         username=username,
