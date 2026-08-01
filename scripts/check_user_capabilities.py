@@ -59,6 +59,31 @@ from pathlib import Path
 RESULT: dict[str, object] = {}
 
 
+#: iRODS ticket error codes (rodsErrorTable.h, range -890000..-899000).
+#: python-irodsclient 3.3.0 only maps the first three, so the rest surface
+#: as a bare ``KeyError(<code>)`` from ``get_exception_by_code`` -- which
+#: reads like a client bug but is in fact the server refusing the request.
+IRODS_TICKET_ERRORS = {
+    -890000: "CAT_TICKET_INVALID",
+    -891000: "CAT_TICKET_EXPIRED",
+    -892000: "CAT_TICKET_USES_EXCEEDED",
+    -893000: "CAT_TICKET_USER_EXCLUDED",
+    -894000: "CAT_TICKET_HOST_EXCLUDED",
+    -895000: "CAT_TICKET_GROUP_EXCLUDED",
+    -896000: "CAT_TICKET_WRITE_USES_EXCEEDED",
+    -897000: "CAT_TICKET_WRITE_BYTES_EXCEEDED",
+}
+
+
+def _decode_irods(exc: BaseException) -> str | None:
+    """Recover an iRODS ticket-error name from an unmapped KeyError."""
+    if isinstance(exc, KeyError) and exc.args:
+        code = exc.args[0]
+        if isinstance(code, int) and code in IRODS_TICKET_ERRORS:
+            return IRODS_TICKET_ERRORS[code]
+    return None
+
+
 def _describe(exc: BaseException) -> str:
     """Describe a failure well enough to tell a refusal from a bug.
 
@@ -75,6 +100,11 @@ def _describe(exc: BaseException) -> str:
         frame = tb.tb_frame
         where = f"{Path(frame.f_code.co_filename).name}:{tb.tb_lineno} in {frame.f_code.co_name}"
         tb = tb.tb_next
+    known = _decode_irods(exc)
+    if known:
+        # An iRODS refusal wearing a KeyError costume. Name it, so the
+        # verdict is read as enforcement rather than as a probe failure.
+        return f"{known} (iRODS refusal; client has no mapping for this code)"
     detail = str(exc) or "<no message>"
     return f"{type(exc).__name__}({detail}) at {where}"
 
@@ -227,7 +257,7 @@ def main() -> int:
             except Exception as exc:
                 return False, _describe(exc)
 
-        def _read_object_with_ticket() -> tuple[bool, str]:
+        def _read_object_with_ticket(which: str | None = None) -> tuple[bool, str]:
             """Actually OPEN a data object through the ticket.
 
             A ``collections.get`` is a catalog stat. iRODS meters ticket
@@ -237,7 +267,7 @@ def main() -> int:
             """
             try:
                 with anon_session() as anon:
-                    Ticket(anon, ticket=ticket_string).supply()
+                    Ticket(anon, ticket=which or ticket_string).supply()
                     coll = anon.collections.get(args.collection)
                     if not coll.data_objects:
                         return False, "no data objects in collection"
@@ -248,7 +278,7 @@ def main() -> int:
             except Exception as exc:
                 return False, _describe(exc)
 
-        def _icat_state() -> str:
+        def _icat_state(which: str | None = None) -> str:
             """Read the ticket's recorded state back from the catalog.
 
             Distinguishes 'the restriction was never recorded' (a silent
@@ -261,7 +291,7 @@ def main() -> int:
                 with session() as s:
                     rows = list(
                         s.query(TicketQuery.Ticket).filter(
-                            TicketQuery.Ticket.string == ticket_string
+                            TicketQuery.Ticket.string == (which or ticket_string)
                         )
                     )
                     if not rows:
@@ -415,43 +445,53 @@ def main() -> int:
                     "skipped (pass --other-user to test the decisive check)"
                 )
 
-            # 4b. Spend limit. Set uses to 1 and use it twice: the second
-            #     attempt must fail. Only run when the ticket is still
-            #     usable — a bound user-restriction above already closed it.
-            usable, _ = _open_with_ticket()
-            if not usable:
-                RESULT["restriction_uses_binds"] = (
-                    "INCONCLUSIVE -- ticket already closed by the user "
-                    "restriction above"
-                )
-            else:
-                try:
-                    with session() as s:
-                        Ticket(s, ticket=ticket_string).modify("uses", "1")
-                    RESULT["icat_after_uses_limit"] = _icat_state()
-                    # Meter on real object reads: iRODS counts a "use" at
-                    # data-object access, not necessarily at catalog stat.
-                    first, why1 = _read_object_with_ticket()
-                    second, why2 = _read_object_with_ticket()
-                    RESULT["icat_after_two_reads"] = _icat_state()
-                    if first and not second:
-                        RESULT["restriction_uses_binds"] = f"yes -- spent ({why2})"
-                    elif first and second:
-                        RESULT["restriction_uses_binds"] = (
-                            "NO -- two data-object reads succeeded with "
-                            "uses=1. Compare icat_after_uses_limit and "
-                            "icat_after_two_reads: if uses_count did not "
-                            "increment, the zone is not metering this ticket."
-                        )
-                    else:
-                        RESULT["restriction_uses_binds"] = (
-                            f"INCONCLUSIVE -- could not read a data object "
-                            f"({why1}); the limit was never exercised"
-                        )
-                except Exception as exc:
+            # 4b. Spend limit, on a SECOND, INDEPENDENT ticket.
+            #
+            # The first ticket is now pinned to another user, so every read
+            # through it is refused by THAT restriction and the uses limit
+            # can never be reached -- the two tests would confound each
+            # other. Issue a fresh unrestricted ticket for this one.
+            uses_ticket: str | None = None
+            try:
+                with session() as s:
+                    t2 = Ticket(s)
+                    t2.issue("read", args.collection)
+                    uses_ticket = t2._ticket  # never printed
+                    Ticket(s, ticket=uses_ticket).modify("uses", "1")
+                RESULT["icat_after_uses_limit"] = _icat_state(uses_ticket)
+                # Meter on real object reads: iRODS counts a "use" at
+                # data-object access, not necessarily at catalog stat.
+                first, why1 = _read_object_with_ticket(uses_ticket)
+                second, why2 = _read_object_with_ticket(uses_ticket)
+                RESULT["icat_after_two_reads"] = _icat_state(uses_ticket)
+                if first and not second:
+                    RESULT["restriction_uses_binds"] = f"yes -- spent ({why2})"
+                elif first and second:
                     RESULT["restriction_uses_binds"] = (
-                        f"not applicable -- modify rejected: {type(exc).__name__}"
+                        "NO -- two data-object reads succeeded with "
+                        "uses=1. Compare icat_after_uses_limit and "
+                        "icat_after_two_reads: if uses_count did not "
+                        "increment, the zone is not metering this ticket."
                     )
+                else:
+                    RESULT["restriction_uses_binds"] = (
+                        f"INCONCLUSIVE -- could not read a data object "
+                        f"({why1}); the limit was never exercised"
+                    )
+            except Exception as exc:
+                RESULT["restriction_uses_binds"] = (
+                    f"not applicable -- {_describe(exc)}"
+                )
+            finally:
+                if uses_ticket:
+                    try:
+                        with session() as s:
+                            Ticket(s, ticket=uses_ticket).delete()
+                        RESULT["uses_ticket_revoked"] = "ok"
+                    except Exception as exc:
+                        RESULT["uses_ticket_revoked"] = (
+                            f"FAILED -- REVOKE MANUALLY: {type(exc).__name__}"
+                        )
 
     finally:
         # 5. Always revoke, even if a check above raised.
