@@ -59,6 +59,26 @@ from pathlib import Path
 RESULT: dict[str, object] = {}
 
 
+def _describe(exc: BaseException) -> str:
+    """Describe a failure well enough to tell a refusal from a bug.
+
+    A bare exception *name* is not enough: a ``KeyError`` from a client
+    library bug and a genuine iRODS permission denial are both "an
+    exception", but only one of them is evidence about the server. This
+    reports the type, the message, and the innermost frame -- so a
+    failure inside python-irodsclient is visibly not an iRODS refusal.
+    """
+
+    tb = exc.__traceback__
+    where = ""
+    while tb is not None:
+        frame = tb.tb_frame
+        where = f"{Path(frame.f_code.co_filename).name}:{tb.tb_lineno} in {frame.f_code.co_name}"
+        tb = tb.tb_next
+    detail = str(exc) or "<no message>"
+    return f"{type(exc).__name__}({detail}) at {where}"
+
+
 def _env_file_path() -> Path:
     return Path(
         os.environ.get(
@@ -205,7 +225,7 @@ def main() -> int:
                     c = anon.collections.get(args.collection)
                     return True, f"{len(c.data_objects) + len(c.subcollections)} entries"
             except Exception as exc:
-                return False, f"{type(exc).__name__}"
+                return False, _describe(exc)
 
         def _read_object_with_ticket() -> tuple[bool, str]:
             """Actually OPEN a data object through the ticket.
@@ -226,7 +246,7 @@ def main() -> int:
                         fh.read(1)
                     return True, "read 1 byte"
             except Exception as exc:
-                return False, f"{type(exc).__name__}"
+                return False, _describe(exc)
 
         def _icat_state() -> str:
             """Read the ticket's recorded state back from the catalog.
@@ -306,6 +326,20 @@ def main() -> int:
             except Exception as exc:
                 RESULT["ticket_scope_contained"] = f"yes ({type(exc).__name__})"
 
+        # 3c. BASELINE for the object-read probe.
+        #
+        # The restriction checks below conclude from "a data-object read
+        # failed". That inference requires knowing the read WORKED before
+        # any restriction was applied -- otherwise a read that never
+        # worked (client bug, no readable replica, unsupported call) is
+        # misattributed to the restriction.
+        baseline_read, baseline_why = _read_object_with_ticket()
+        RESULT["object_read_baseline"] = (
+            "ok -- unrestricted ticket can read a data object"
+            if baseline_read
+            else f"FAILED before any restriction: {baseline_why}"
+        )
+
         # 4. Do restrictions BIND? Applying a restriction only proves the
         #    server accepted the modify call. Each check below therefore
         #    applies the restriction and then RE-EXERCISES the ticket to
@@ -341,14 +375,27 @@ def main() -> int:
                     # A catalog stat may not trigger the check; a real read
                     # is the access iRODS actually gates.
                     still_read, why_read = _read_object_with_ticket()
-                    if not still_stat and not still_read:
+                    if not baseline_read and not still_stat and not still_read:
+                        RESULT["restriction_user_binds"] = (
+                            "INCONCLUSIVE -- object reads never worked (see "
+                            "object_read_baseline), so a failed read now is "
+                            "not evidence about the restriction"
+                        )
+                    elif not still_stat and not still_read:
                         RESULT["restriction_user_binds"] = f"yes -- now refused ({why})"
-                    elif still_stat and not still_read:
+                    elif still_stat and not still_read and baseline_read:
                         RESULT["restriction_user_binds"] = (
                             f"PARTIAL -- collection stat still works, but "
                             f"reading a data object is now refused "
                             f"({why_read}). Enforcement is at object access, "
                             f"not at catalog stat."
+                        )
+                    elif still_stat and not still_read:
+                        RESULT["restriction_user_binds"] = (
+                            f"INCONCLUSIVE -- the object read fails both "
+                            f"before and after the restriction "
+                            f"({why_read}); nothing changed, so this is a "
+                            f"probe/client limitation, not enforcement"
                         )
                     else:
                         RESULT["restriction_user_binds"] = (
