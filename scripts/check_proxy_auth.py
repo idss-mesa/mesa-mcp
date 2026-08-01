@@ -138,15 +138,35 @@ def main() -> int:
     # 3. The security question: are ACLs applied to the PROXIED user, or
     #    does the admin's reach leak through? Reading a third party's home
     #    while acting as a non-admin must fail.
-    other = args.admin if args.as_user != args.admin else "rods"
-    try:
-        with session(client_user=args.as_user, client_zone=zone) as s:
-            s.collections.get(f"/{zone}/home/{other}")
+    #
+    # This check is only meaningful when check 2 SUCCEEDED. If the proxy
+    # session could not be established at all, this probe fails with the
+    # same exception and would otherwise report a vacuous "yes" -- an ACL
+    # pass that proves nothing. Gate it explicitly.
+    if RESULT.get("proxy_auth") != "ok":
         RESULT["acl_enforced_on_proxied_user"] = (
-            f"NO -- as {args.as_user} we could read /{zone}/home/{other}"
+            "INCONCLUSIVE -- proxy auth did not succeed, so this probe "
+            "cannot distinguish 'ACLs enforced' from 'no proxy session'"
         )
-    except Exception as exc:
-        RESULT["acl_enforced_on_proxied_user"] = f"yes ({type(exc).__name__})"
+    else:
+        other = args.admin if args.as_user != args.admin else "rods"
+        try:
+            with session(client_user=args.as_user, client_zone=zone) as s:
+                s.collections.get(f"/{zone}/home/{other}")
+            RESULT["acl_enforced_on_proxied_user"] = (
+                f"NO -- as {args.as_user} we could read /{zone}/home/{other}"
+            )
+        except Exception as exc:
+            # A permission error is the expected, correct outcome. Any
+            # other failure means the probe itself broke -- say so rather
+            # than counting it as a pass.
+            name = type(exc).__name__
+            if "PROXYUSER" in name.upper():
+                RESULT["acl_enforced_on_proxied_user"] = (
+                    f"INCONCLUSIVE -- proxy session collapsed ({name})"
+                )
+            else:
+                RESULT["acl_enforced_on_proxied_user"] = f"yes ({name})"
 
     _report()
     return 0
