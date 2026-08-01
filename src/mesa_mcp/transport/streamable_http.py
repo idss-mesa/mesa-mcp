@@ -38,7 +38,7 @@ STREAMABLE_HTTP_PATH = "/mcp"
 
 
 def build_streamable_http_session_manager(
-    server: "MesaServer",
+    server: MesaServer,
 ) -> StreamableHTTPSessionManager:
     """Build a Streamable HTTP session manager bound to ``server``'s tools.
 

@@ -57,7 +57,7 @@ def issuer_from_discovery_url(discovery_url: str) -> str:
     return discovery_url
 
 
-def resource_url(scope: Scope, *, config: "Config | None") -> str:
+def resource_url(scope: Scope, *, config: Config | None) -> str:
     """Return the canonical resource URL for this mesa-mcp deployment.
 
     Prefers ``ServerConfig.public_base_url`` when set; otherwise rebuilds
@@ -79,7 +79,7 @@ def resource_url(scope: Scope, *, config: "Config | None") -> str:
     return f"{scheme}://{host}"
 
 
-def metadata_url(scope: Scope, *, config: "Config | None") -> str:
+def metadata_url(scope: Scope, *, config: Config | None) -> str:
     """Return the absolute URL of the protected-resource metadata document."""
     return f"{resource_url(scope, config=config)}{PROTECTED_RESOURCE_METADATA_PATH}"
 
