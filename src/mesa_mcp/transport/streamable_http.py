@@ -22,7 +22,7 @@ We just build one around a shared :class:`mcp.server.Server` and let
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
@@ -38,7 +38,7 @@ STREAMABLE_HTTP_PATH = "/mcp"
 
 
 def build_streamable_http_session_manager(
-    server: "MesaServer",
+    server: MesaServer,
 ) -> StreamableHTTPSessionManager:
     """Build a Streamable HTTP session manager bound to ``server``'s tools.
 
@@ -50,10 +50,20 @@ def build_streamable_http_session_manager(
     pattern is safe here.
 
     ``json_response=False`` keeps the default behavior: the manager picks
-    SSE or single JSON depending on the request shape. ``stateless=False``
-    means client sessions persist across requests (the ``Mcp-Session-Id``
-    header). Stateless mode is appropriate for a Lambda-style serverless
-    deployment but not for our long-running uvicorn process.
+    SSE or single JSON depending on the request shape.
+
+    ``stateless=True`` implements the **MCP 2026-07-28 stateless core**:
+    no ``initialize`` handshake and no ``Mcp-Session-Id``. Every POST is
+    self-contained, so any mesa-mcp instance can answer any request and the
+    hosted deployment scales horizontally behind a plain round-robin load
+    balancer instead of requiring session affinity.
+
+    This is safe for mesa-mcp because the server holds no per-client
+    protocol state: the caller's identity is re-derived from the bearer
+    token on every request by :class:`~mesa_mcp.transport.sse.OIDCMiddleware`,
+    and the iRODS connection pool is keyed by
+    :meth:`~mesa_mcp.auth.models.AuthValue.cache_key` — a per-caller cache,
+    not a per-session one.
     """
     from mcp.server import Server as McpServer
 
@@ -61,5 +71,50 @@ def build_streamable_http_session_manager(
     return StreamableHTTPSessionManager(
         app=mcp_server,
         json_response=False,
-        stateless=False,
+        stateless=True,
+        security_settings=_transport_security(server.config),
+    )
+
+
+def _transport_security(config: Any) -> Any | None:
+    """Build DNS-rebinding protection settings from config.
+
+    Validating ``Host`` and ``Origin`` matters more under the stateless
+    core: with no session handshake to anchor a connection, every POST is
+    independently trusted, so a rebound DNS name pointing a victim's
+    browser at a locally-bound mesa-mcp would otherwise reach the tool
+    surface directly.
+
+    Returns ``None`` when no allow-list is configured — appropriate behind
+    a reverse proxy that already normalizes ``Host``, and the SDK default.
+    """
+    from mcp.server.transport_security import (  # type: ignore[import-not-found]
+        TransportSecuritySettings,
+    )
+
+    server_config = getattr(config, "server", None)
+    if server_config is None:
+        return None
+
+    hosts = list(getattr(server_config, "allowed_hosts", []) or [])
+    origins = list(getattr(server_config, "allowed_origins", []) or [])
+
+    # The public base URL is by definition a legitimate Host/Origin.
+    public = getattr(server_config, "public_base_url", None)
+    if public:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(public)
+        if parsed.netloc:
+            if parsed.netloc not in hosts:
+                hosts.append(parsed.netloc)
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+            if origin not in origins:
+                origins.append(origin)
+
+    if not hosts and not origins:
+        return None
+    return TransportSecuritySettings(
+        allowed_hosts=hosts,
+        allowed_origins=origins,
     )

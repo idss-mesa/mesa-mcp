@@ -24,7 +24,9 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "mcp>=1.0",
+    # MCP 2026-07-28 spec (stateless core). SDK 2.x removed the 1.x
+    # decorator registration API, so the lower bound is not optional.
+    "mcp>=2.0,<3",
     "python-irodsclient>=2.0",
     "pydantic>=2.6",
     "pyyaml",
@@ -38,6 +40,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# DuckLake AVU-history mirroring. mesa_mcp.ducklake.client imports this
+# lazily and degrades to "mirroring disabled" when it is absent, so it is
+# genuinely optional — but it was previously declared nowhere, leaving no
+# supported way to install mesa-mcp *with* the feature enabled.
+ducklake = [
+    "mesa-ducklake",
+]
 dev = [
     "pytest",
     "pytest-asyncio",

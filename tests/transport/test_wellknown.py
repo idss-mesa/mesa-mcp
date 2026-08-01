@@ -28,7 +28,6 @@ from mesa_mcp.transport.wellknown import (
     issuer_from_discovery_url,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helper from test_sse_auth.py — duplicated here to keep this file standalone.
 # ---------------------------------------------------------------------------

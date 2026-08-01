@@ -1,11 +1,14 @@
 """set_active_config / get_active_config + get_default_client honoring it."""
 
+import importlib.util
+
+import pytest
+
 import mesa_mcp.ducklake.client as dl_client
 from mesa_mcp.config import (
     Config,
     DuckLakeConfig,
     get_active_config,
-    load_config,
     set_active_config,
 )
 
@@ -27,6 +30,10 @@ def test_get_active_config_falls_back_without_active():
     assert isinstance(cfg, Config)
 
 
+@pytest.mark.skipif(
+    importlib.util.find_spec("mesa_ducklake") is None,
+    reason="requires the optional 'ducklake' extra (pip install mesa-mcp[ducklake])",
+)
 def test_get_default_client_reads_catalog_dsn_from_active_config(tmp_path):
     dsn = f"duckdb:///{tmp_path / 'cat.duckdb'}"
     set_active_config(Config(ducklake=DuckLakeConfig(catalog_dsn=dsn)))

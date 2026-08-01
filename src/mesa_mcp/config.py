@@ -98,11 +98,34 @@ class ServerConfig(BaseModel):
     oidc_discovery_url: str | None = None
     oauth2_client_id: str | None = None
     oauth2_client_secret: str | None = None
-    # Expected ``aud`` claim for inbound JWTs. When set, the OIDC middleware
-    # rejects tokens whose audience does not match. When left ``None`` the
-    # middleware skips audience validation (useful when the access token is
-    # issued for a different client than the resource server's own ID).
+    # Expected ``aud`` claim for inbound JWTs. When left ``None`` the
+    # authenticator falls back to ``public_base_url`` — the canonical
+    # resource identifier this server publishes in its RFC 9728
+    # protected-resource metadata, which is what RFC 8707 resource
+    # indicators bind a token to.
     oidc_audience: str | None = None
+
+    # Enforce audience binding (MCP 2026-07-28 authorization hardening).
+    #
+    # When ``True`` (the default) a token must carry an ``aud`` claim
+    # matching this resource, and the server refuses to start the HTTP
+    # transport unless an audience can be resolved. This prevents the
+    # confused-deputy case where a token minted for *another* CyVerse
+    # service is replayed against mesa-mcp: without an audience check any
+    # validly-signed realm token is accepted.
+    #
+    # Set ``False`` only for a legacy deployment that cannot yet issue
+    # audience-bound tokens; it re-opens that replay path, so it warns
+    # loudly on every request.
+    oidc_require_audience: bool = True
+
+    # Host/Origin allow-lists for the Streamable HTTP transport
+    # (DNS-rebinding protection). Empty lists leave validation disabled,
+    # which is correct behind a trusted reverse proxy that already
+    # normalizes Host, but should be populated for a directly-exposed
+    # deployment. ``public_base_url``'s host is added automatically.
+    allowed_hosts: list[str] = Field(default_factory=list)
+    allowed_origins: list[str] = Field(default_factory=list)
 
     log_level: LogLevel = "info"
 

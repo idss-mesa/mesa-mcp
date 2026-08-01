@@ -47,6 +47,7 @@ def _make_token(
 async def test_authenticate_happy_path(fake_keycloak, fake_http_client):
     auth = OIDCAuthenticator(
         discovery_url=fake_keycloak.discovery_url,
+        require_audience=False,  # legacy fixture: not exercising aud binding
         http_client=fake_http_client,
     )
     token = _make_token(fake_keycloak)
@@ -60,6 +61,7 @@ async def test_authenticate_happy_path(fake_keycloak, fake_http_client):
 async def test_authenticate_caches_discovery_and_jwks(fake_keycloak, fake_http_client):
     auth = OIDCAuthenticator(
         discovery_url=fake_keycloak.discovery_url,
+        require_audience=False,  # legacy fixture: not exercising aud binding
         http_client=fake_http_client,
     )
     token = _make_token(fake_keycloak)
@@ -75,6 +77,7 @@ async def test_authenticate_caches_discovery_and_jwks(fake_keycloak, fake_http_c
 async def test_username_falls_back_to_sub(fake_keycloak, fake_http_client):
     auth = OIDCAuthenticator(
         discovery_url=fake_keycloak.discovery_url,
+        require_audience=False,  # legacy fixture: not exercising aud binding
         http_client=fake_http_client,
     )
     token = _make_token(
@@ -92,6 +95,7 @@ async def test_username_falls_back_to_sub(fake_keycloak, fake_http_client):
 async def test_username_strips_realm_suffix(fake_keycloak, fake_http_client):
     auth = OIDCAuthenticator(
         discovery_url=fake_keycloak.discovery_url,
+        require_audience=False,  # legacy fixture: not exercising aud binding
         http_client=fake_http_client,
     )
     token = _make_token(
@@ -110,6 +114,7 @@ async def test_username_strips_realm_suffix(fake_keycloak, fake_http_client):
 async def test_missing_token_raises(fake_keycloak, fake_http_client):
     auth = OIDCAuthenticator(
         discovery_url=fake_keycloak.discovery_url,
+        require_audience=False,  # legacy fixture: not exercising aud binding
         http_client=fake_http_client,
     )
     with pytest.raises(OIDCError) as exc_info:
@@ -121,6 +126,7 @@ async def test_missing_token_raises(fake_keycloak, fake_http_client):
 async def test_malformed_authorization_header(fake_keycloak, fake_http_client):
     auth = OIDCAuthenticator(
         discovery_url=fake_keycloak.discovery_url,
+        require_audience=False,  # legacy fixture: not exercising aud binding
         http_client=fake_http_client,
     )
     with pytest.raises(OIDCError):
@@ -130,6 +136,7 @@ async def test_malformed_authorization_header(fake_keycloak, fake_http_client):
 async def test_expired_token(fake_keycloak, fake_http_client):
     auth = OIDCAuthenticator(
         discovery_url=fake_keycloak.discovery_url,
+        require_audience=False,  # legacy fixture: not exercising aud binding
         http_client=fake_http_client,
     )
     now = int(time.time())
@@ -171,6 +178,7 @@ async def test_correct_audience_accepted(fake_keycloak, fake_http_client):
 async def test_wrong_issuer(fake_keycloak, fake_http_client):
     auth = OIDCAuthenticator(
         discovery_url=fake_keycloak.discovery_url,
+        require_audience=False,  # legacy fixture: not exercising aud binding
         http_client=fake_http_client,
     )
     token = _make_token(
@@ -188,6 +196,7 @@ async def test_invalid_signature(fake_keycloak, fake_http_client):
 
     auth = OIDCAuthenticator(
         discovery_url=fake_keycloak.discovery_url,
+        require_audience=False,  # legacy fixture: not exercising aud binding
         http_client=fake_http_client,
     )
     rogue_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -204,6 +213,7 @@ async def test_invalid_signature(fake_keycloak, fake_http_client):
 async def test_unknown_kid(fake_keycloak, fake_http_client):
     auth = OIDCAuthenticator(
         discovery_url=fake_keycloak.discovery_url,
+        require_audience=False,  # legacy fixture: not exercising aud binding
         http_client=fake_http_client,
     )
     token = _make_token(
@@ -225,6 +235,7 @@ async def test_discovery_unreachable(fake_keycloak):
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     auth = OIDCAuthenticator(
         discovery_url=fake_keycloak.discovery_url,
+        require_audience=False,  # legacy fixture: not exercising aud binding
         http_client=client,
     )
     token = _make_token(fake_keycloak)
@@ -236,6 +247,7 @@ async def test_discovery_unreachable(fake_keycloak):
 async def test_token_missing_username_claims(fake_keycloak, fake_http_client):
     auth = OIDCAuthenticator(
         discovery_url=fake_keycloak.discovery_url,
+        require_audience=False,  # legacy fixture: not exercising aud binding
         http_client=fake_http_client,
     )
     # ``sub`` is required by JWT decoders in some configs; we don't require

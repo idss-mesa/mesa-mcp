@@ -31,13 +31,108 @@ from pydantic import BaseModel
 
 from . import __version__
 from .config import Config
-from .errors import ToolError
+from .errors import InputRequired, ToolError
 
 # ---------------------------------------------------------------------------
 # Tool registry
 # ---------------------------------------------------------------------------
 
 ToolHandler = Callable[..., Awaitable[dict[str, Any]]]
+
+# --- MCP 2026-07-28 spec constants -----------------------------------------
+
+#: JSON Schema dialect the spec pins tool schemas to.
+JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
+
+#: ``tools/list`` cache TTL. The tool surface is fixed at deploy time, so a
+#: 5-minute public TTL is safe. Under the stateless core there is no session
+#: to amortize discovery over, so cacheable list results matter more than
+#: they did pre-2026-07-28.
+TOOLS_LIST_TTL_MS = 300_000
+
+
+#: Cap on the encoded ``requestState`` blob. It round-trips through the
+#: client on every follow-up call, and an unbounded continuation would be
+#: both a wire cost and a decode-side memory risk.
+MAX_REQUEST_STATE_BYTES = 16 * 1024
+
+
+def _encode_request_state(state: dict[str, Any]) -> str:
+    """Serialize an MRTR continuation for the round trip to the client.
+
+    Deliberately **not** signed or encrypted. A signature would need a
+    secret shared by every instance (the follow-up call lands wherever the
+    load balancer sends it), and distributing one buys nothing here:
+    ``request_state`` carries only *what was being asked* — a search query,
+    the candidate terms offered — never an authorization decision. On
+    resume the handler re-derives every privileged fact from the caller's
+    live bearer token, so a tampered blob lets an attacker alter only
+    their own question.
+
+    Anything that would be unsafe to accept back from the client must not
+    be put in here in the first place.
+    """
+    import base64
+    import json
+
+    raw = json.dumps(state, separators=(",", ":")).encode("utf-8")
+    if len(raw) > MAX_REQUEST_STATE_BYTES:
+        raise ToolError(
+            code="internal_error",
+            message="MRTR continuation state is too large to round-trip.",
+            details={"bytes": len(raw), "limit": MAX_REQUEST_STATE_BYTES},
+        )
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def _decode_request_state(encoded: str) -> dict[str, Any]:
+    """Decode a client-returned continuation. Treats input as untrusted."""
+    import base64
+    import binascii
+    import json
+
+    if len(encoded) > MAX_REQUEST_STATE_BYTES * 2:
+        raise ToolError(
+            code="invalid_argument",
+            message="requestState is too large.",
+            details={},
+        )
+    try:
+        raw = base64.urlsafe_b64decode(encoded.encode("ascii"))
+        decoded = json.loads(raw)
+    except (ValueError, binascii.Error) as exc:
+        raise ToolError(
+            code="invalid_argument",
+            message="requestState is not a valid continuation token.",
+            details={},
+        ) from exc
+    if not isinstance(decoded, dict):
+        raise ToolError(
+            code="invalid_argument",
+            message="requestState must decode to an object.",
+            details={},
+        )
+    return decoded
+
+
+def _tool_surface(name: str) -> str:
+    """Classify a tool into its mesa-mcp surface family, for ``_meta``.
+
+    mesa-mcp exposes ~50 tools spanning four subsystems; tagging each with
+    its family lets a client group or filter them without name-prefix
+    guesswork.
+    """
+    if name.startswith(("mesa_ols_", "mesa_avu_apply_term", "mesa_avu_from_term")):
+        return "ontology"
+    if name.startswith("mesa_ducklake_"):
+        return "history"
+    if name.startswith(("mesa_datacite_", "mesa_avu_apply_datacite")):
+        return "datacite"
+    if name.startswith("mesa_policy_"):
+        return "policy"
+    if name.startswith("ds_"):
+        return "irods"
+    return "core"
 
 
 @dataclass(frozen=True)
@@ -48,6 +143,11 @@ class ToolSpec:
     description: str
     handler: ToolHandler
     input_model: type[BaseModel] | None = None
+    #: Optional Pydantic model describing the handler's return payload. When
+    #: set, it is published as the tool's ``outputSchema`` (MCP 2026-07-28),
+    #: letting clients validate structured results instead of parsing prose.
+    #: Opt-in per tool: handlers still return plain dicts.
+    output_model: type[BaseModel] | None = None
     # Free-form extras (kept for forward-compat with later wiring needs).
     meta: dict[str, Any] = field(default_factory=dict)
 
@@ -60,6 +160,7 @@ def register_tool(
     description: str,
     *,
     input_model: type[BaseModel] | None = None,
+    output_model: type[BaseModel] | None = None,
 ) -> Callable[[ToolHandler], ToolHandler]:
     """Decorator that adds a tool to the global mesa-mcp tool registry.
 
@@ -78,6 +179,7 @@ def register_tool(
             description=description,
             handler=handler,
             input_model=input_model,
+            output_model=output_model,
         )
         return handler
 
@@ -110,11 +212,24 @@ class DsPingInput(BaseModel):
     message: str | None = None
 
 
+class DsPingOutput(BaseModel):
+    """Output schema for ``ds_ping``.
+
+    Reference implementation of the opt-in ``output_model`` hook: declaring
+    it publishes an ``outputSchema`` (MCP 2026-07-28) so clients can validate
+    the structured result rather than parsing the text block.
+    """
+
+    pong: str
+    version: str
+
+
 @register_tool(
     "ds_ping",
     "Liveness check. Echoes back the supplied message (or 'ok') and the "
     "running mesa-mcp version. No iRODS access required.",
     input_model=DsPingInput,
+    output_model=DsPingOutput,
 )
 async def handle_ds_ping(args: DsPingInput) -> dict[str, Any]:
     """Return a structured pong payload."""
@@ -159,7 +274,13 @@ def _handler_accepts_kwarg(handler: ToolHandler, name: str) -> bool:
     return False
 
 
-async def _invoke_handler(spec: ToolSpec, raw_args: dict[str, Any] | None) -> dict[str, Any]:
+async def _invoke_handler(
+    spec: ToolSpec,
+    raw_args: dict[str, Any] | None,
+    *,
+    input_responses: dict[str, Any] | None = None,
+    request_state: str | None = None,
+) -> dict[str, Any]:
     """Validate ``raw_args`` against the spec's input model and dispatch.
 
     Centralized so the MCP adapter and the unit tests share one code path.
@@ -177,6 +298,15 @@ async def _invoke_handler(spec: ToolSpec, raw_args: dict[str, Any] | None) -> di
     extra_kwargs: dict[str, Any] = {}
     if _handler_accepts_kwarg(spec.handler, "auth_value"):
         extra_kwargs["auth_value"] = get_current_auth_value()
+
+    # MRTR resume (MCP 2026-07-28). Only handlers that opt in by declaring
+    # these keywords ever see them; the other 49 tools are untouched.
+    if _handler_accepts_kwarg(spec.handler, "elicited"):
+        elicited: dict[str, Any] | None = None
+        if input_responses:
+            state = _decode_request_state(request_state) if request_state else {}
+            elicited = {"responses": input_responses, "state": state}
+        extra_kwargs["elicited"] = elicited
 
     if spec.input_model is None:
         if raw_args:
@@ -220,8 +350,21 @@ class MesaServer:
         if not self.tools:
             self.tools = get_registered_tools()
 
-    async def call(self, name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
-        """In-process tool invocation, used by tests and embedders."""
+    async def call(
+        self,
+        name: str,
+        args: dict[str, Any] | None = None,
+        *,
+        input_responses: dict[str, Any] | None = None,
+        request_state: str | None = None,
+    ) -> dict[str, Any]:
+        """In-process tool invocation, used by tests and embedders.
+
+        ``input_responses`` / ``request_state`` carry an MRTR follow-up
+        (MCP 2026-07-28): the user's answer to an earlier
+        :class:`~mesa_mcp.errors.InputRequired`, plus the continuation
+        this server handed out. Both are absent on a first call.
+        """
         try:
             spec = _REGISTRY[name]
         except KeyError as exc:
@@ -230,7 +373,12 @@ class MesaServer:
                 message=f"No tool registered with name {name!r}.",
                 details={"name": name},
             ) from exc
-        return await _invoke_handler(spec, args)
+        return await _invoke_handler(
+            spec,
+            args,
+            input_responses=input_responses,
+            request_state=request_state,
+        )
 
     async def serve(self, transport: str) -> None:
         """Run the MCP server on the given transport. Imports ``mcp`` lazily."""
@@ -274,6 +422,13 @@ class MesaServer:
         mcp_server = self._build_mcp_server(Server)
         try:
             async with stdio_server() as (read_stream, write_stream):
+                # SDK 2.x ``run()`` drives a *dual-era* loop: the client's
+                # first request selects either the legacy handshake era or
+                # the 2026-07-28 per-request-envelope era. The options object
+                # is therefore no longer an ``initialize`` handshake — it is
+                # the capability/extension declaration the SDK serves to
+                # ``server/discover``. It stays, so a stdio client on either
+                # era works.
                 await mcp_server.run(
                     read_stream,
                     write_stream,
@@ -313,43 +468,117 @@ class MesaServer:
                 await authenticator.aclose()
 
     def _build_mcp_server(self, server_cls: Any) -> Any:
-        """Construct an ``mcp.server.Server`` populated with our tool registry."""
+        """Construct an ``mcp.server.Server`` populated with our tool registry.
+
+        Targets the **MCP 2026-07-28** spec via the ``mcp`` Python SDK 2.x.
+
+        The 1.x decorator API (``@server.list_tools()`` /
+        ``@server.call_tool()``) was removed in SDK 2.0.0; registration now
+        happens through **constructor callbacks** that take a
+        ``ServerRequestContext`` plus typed params and return typed results.
+        The mesa-mcp tool registry itself is unchanged — this adapter is the
+        only SDK-coupled seam.
+
+        Spec features wired here:
+
+        * **Cacheable list results** — ``cache_hints`` makes the SDK stamp
+          ``ttlMs``/``cacheScope`` onto ``tools/list``. Our tool surface is
+          static for the lifetime of a deployment, so a minutes-scale public
+          TTL is safe and saves every client a full re-list per request (which
+          matters much more now that there is no session to amortize it over).
+        * **JSON Schema 2020-12** — tool ``inputSchema`` carries an explicit
+          ``$schema`` dialect declaration.
+        * **Universal ``_meta``** — tool definitions advertise their mesa-mcp
+          surface family so clients can group ~50 tools sensibly.
+
+        ``server/discover`` is handled by the SDK itself; there is no
+        ``initialize`` handshake to configure.
+        """
         from mcp import types as mcp_types  # type: ignore[import-not-found]
+        from mcp.server.caching import CacheHint  # type: ignore[import-not-found]
 
-        mcp_server = server_cls("mesa-mcp")
+        async def _on_list_tools(_ctx: Any, _params: Any = None) -> Any:
+            return mcp_types.ListToolsResult(tools=self._tool_definitions())
 
-        # The mcp Python SDK uses decorators on the Server instance to wire
-        # up the list_tools / call_tool callbacks. We register them here.
-
-        @mcp_server.list_tools()  # type: ignore[misc]
-        async def _list_tools() -> list[Any]:
-            out = []
-            for spec in self.tools:
-                input_schema: dict[str, Any]
-                if spec.input_model is not None:
-                    input_schema = spec.input_model.model_json_schema()
-                else:
-                    input_schema = {"type": "object", "properties": {}}
-                out.append(
-                    mcp_types.Tool(
-                        name=spec.name,
-                        description=spec.description,
-                        inputSchema=input_schema,
-                    )
-                )
-            return out
-
-        @mcp_server.call_tool()  # type: ignore[misc]
-        async def _call_tool(name: str, arguments: dict[str, Any] | None) -> list[Any]:
+        async def _on_call_tool(_ctx: Any, params: Any) -> Any:
             import json
 
+            is_error = False
             try:
-                payload = await self.call(name, arguments)
+                payload = await self.call(
+                    params.name,
+                    params.arguments,
+                    input_responses=getattr(params, "input_responses", None),
+                    request_state=getattr(params, "request_state", None),
+                )
+            except InputRequired as pending:
+                # MRTR: hand the question back to the client rather than
+                # guessing or failing. The continuation rides in
+                # requestState because a stateless server has nowhere else
+                # to keep it — the follow-up call may hit another instance.
+                return mcp_types.InputRequiredResult(
+                    inputRequests={
+                        pending.key: mcp_types.ElicitRequest(
+                            method="elicitation/create",
+                            params=mcp_types.ElicitRequestFormParams(
+                                mode="form",
+                                message=pending.message,
+                                requestedSchema=pending.schema,
+                            ),
+                        )
+                    },
+                    requestState=_encode_request_state(pending.state),
+                )
             except ToolError as exc:
                 payload = {"error": exc.to_payload()}
-            return [mcp_types.TextContent(type="text", text=json.dumps(payload))]
+                is_error = True
+            return mcp_types.CallToolResult(
+                content=[mcp_types.TextContent(type="text", text=json.dumps(payload))],
+                structuredContent=payload,
+                isError=is_error,
+            )
 
-        return mcp_server
+        return server_cls(
+            "mesa-mcp",
+            version=__version__,
+            cache_hints={
+                "tools/list": CacheHint(ttl_ms=TOOLS_LIST_TTL_MS, scope="public"),
+            },
+            on_list_tools=_on_list_tools,
+            on_call_tool=_on_call_tool,
+        )
+
+    def _tool_definitions(self) -> list[Any]:
+        """Render the registry as MCP ``Tool`` objects (spec 2026-07-28).
+
+        Split out from :meth:`_build_mcp_server` so the conformance tests can
+        assert schema dialect and ``_meta`` without standing up a transport.
+        """
+        from mcp import types as mcp_types  # type: ignore[import-not-found]
+
+        out: list[Any] = []
+        for spec in self.tools:
+            if spec.input_model is not None:
+                input_schema = spec.input_model.model_json_schema()
+            else:
+                input_schema = {"type": "object", "properties": {}}
+            # Pydantic v2 emits 2020-12 but omits the dialect declaration;
+            # the spec expects tool schemas to identify their dialect.
+            input_schema.setdefault("$schema", JSON_SCHEMA_DIALECT)
+            output_schema = None
+            if spec.output_model is not None:
+                output_schema = spec.output_model.model_json_schema()
+                output_schema.setdefault("$schema", JSON_SCHEMA_DIALECT)
+            out.append(
+                mcp_types.Tool(
+                    name=spec.name,
+                    description=spec.description,
+                    inputSchema=input_schema,
+                    outputSchema=output_schema,
+                    _meta={"io.mesa/surface": _tool_surface(spec.name)},
+                )
+            )
+        return out
 
 
 # ---------------------------------------------------------------------------
