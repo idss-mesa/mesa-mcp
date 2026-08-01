@@ -159,6 +159,26 @@ def main() -> int:
         _report()
         return 1
 
+    # --- 1b. NEGATIVE CONTROL -------------------------------------------
+    #
+    # Everything below infers "the ticket granted access" from an anonymous
+    # session succeeding. That inference is only valid if the anonymous
+    # user CANNOT already read the collection. /<zone>/home/shared is
+    # world-readable on CyVerse, so without this control every ticket
+    # result is uninterpretable: the ticket is not necessarily what opened
+    # the door, and a *binding* restriction would still look like "NO".
+    try:
+        with anon_session() as anon:
+            anon.collections.get(args.collection)
+        RESULT["anon_reads_without_ticket"] = (
+            "YES -- collection is already anonymous-readable; ticket checks "
+            "below cannot attribute access to the ticket"
+        )
+        anon_baseline = True
+    except Exception as exc:
+        RESULT["anon_reads_without_ticket"] = f"no ({type(exc).__name__}) -- good control"
+        anon_baseline = False
+
     # --- 2..5 ticket lifecycle ------------------------------------------
     ticket_string: str | None = None
     try:
@@ -190,9 +210,18 @@ def main() -> int:
         # 3. Does the ticket delegate to a SEPARATE session? The real test:
         #    an anonymous session holding only the ticket.
         opened, detail = _open_with_ticket()
-        RESULT["ticket_works_in_separate_session"] = "ok" if opened else f"FAILED: {detail}"
-        if opened:
-            RESULT["ticket_saw"] = detail
+        if anon_baseline:
+            RESULT["ticket_works_in_separate_session"] = (
+                "INCONCLUSIVE -- anonymous could already read this collection "
+                "without a ticket (see anon_reads_without_ticket); re-run "
+                "against a collection OUTSIDE /home/shared"
+            )
+        else:
+            RESULT["ticket_works_in_separate_session"] = (
+                "ok" if opened else f"FAILED: {detail}"
+            )
+            if opened:
+                RESULT["ticket_saw"] = detail
 
         # 3b. Does the ticket LEAK beyond its collection?
         try:
@@ -209,7 +238,18 @@ def main() -> int:
         #    server accepted the modify call. Each check below therefore
         #    applies the restriction and then RE-EXERCISES the ticket to
         #    observe whether behaviour actually changed.
-        if not opened:
+        if anon_baseline:
+            # A restriction could bind perfectly and the anonymous session
+            # would STILL open the collection -- via its own standing
+            # access, not the ticket. Reporting "NO" here would be a false
+            # negative that condemns a working mechanism.
+            RESULT["restriction_user_binds"] = (
+                "INCONCLUSIVE -- anonymous has standing read on this "
+                "collection, so continued access proves nothing about the "
+                "restriction"
+            )
+            RESULT["restriction_uses_binds"] = "INCONCLUSIVE -- same"
+        elif not opened:
             RESULT["restriction_user_binds"] = (
                 "INCONCLUSIVE -- ticket did not delegate, nothing to restrict"
             )
