@@ -53,6 +53,40 @@ def _token(kc: FakeKeycloak, **claims: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
+async def test_service_account_token_is_rejected(fake_keycloak, fake_http_client):
+    """A client credential must not become an iRODS username.
+
+    A validly-signed service-account token would otherwise be forwarded as
+    the iRODS user ``service-account-<client>``, so ACLs would be evaluated
+    against a principal that does not exist. Ported from
+    ``cyverse-de/formation``, which rejects these for the same reason.
+    """
+    auth = OIDCAuthenticator(
+        discovery_url=fake_keycloak.discovery_url,
+        audience=RESOURCE,
+        http_client=fake_http_client,
+    )
+    token = _token(
+        fake_keycloak, aud=RESOURCE, preferred_username="service-account-de-client"
+    )
+    with pytest.raises(OIDCError) as exc_info:
+        await auth.authenticate(f"Bearer {token}")
+    assert exc_info.value.status_code == 401
+    assert "service account" in exc_info.value.detail.lower()
+
+
+async def test_ordinary_user_token_still_authenticates(fake_keycloak, fake_http_client):
+    """The rejection must not catch normal users."""
+    auth = OIDCAuthenticator(
+        discovery_url=fake_keycloak.discovery_url,
+        audience=RESOURCE,
+        http_client=fake_http_client,
+    )
+    token = _token(fake_keycloak, aud=RESOURCE, preferred_username="alice@CyVerse")
+    value = await auth.authenticate(f"Bearer {token}")
+    assert value.username == "alice"
+
+
 def test_requires_an_audience_at_construction(fake_keycloak):
     """A server that cannot bind tokens to itself must not accept them."""
     with pytest.raises(ValueError, match="requires an audience"):
