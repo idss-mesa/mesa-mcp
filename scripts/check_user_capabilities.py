@@ -207,6 +207,63 @@ def main() -> int:
             except Exception as exc:
                 return False, f"{type(exc).__name__}"
 
+        def _read_object_with_ticket() -> tuple[bool, str]:
+            """Actually OPEN a data object through the ticket.
+
+            A ``collections.get`` is a catalog stat. iRODS meters ticket
+            *uses* and applies restrictions at data-object open, so a stat
+            may neither decrement the counter nor trigger the user check.
+            Exercising a real read is what tests enforcement.
+            """
+            try:
+                with anon_session() as anon:
+                    Ticket(anon, ticket=ticket_string).supply()
+                    coll = anon.collections.get(args.collection)
+                    if not coll.data_objects:
+                        return False, "no data objects in collection"
+                    obj = coll.data_objects[0]
+                    with anon.data_objects.open(obj.path, "r") as fh:
+                        fh.read(1)
+                    return True, "read 1 byte"
+            except Exception as exc:
+                return False, f"{type(exc).__name__}"
+
+        def _icat_state() -> str:
+            """Read the ticket's recorded state back from the catalog.
+
+            Distinguishes 'the restriction was never recorded' (a silent
+            no-op on modify) from 'recorded but not enforced by the access
+            we exercised'. Without this, both look identical.
+            """
+            try:
+                from irods.models import TicketQuery
+
+                with session() as s:
+                    rows = list(
+                        s.query(TicketQuery.Ticket).filter(
+                            TicketQuery.Ticket.string == ticket_string
+                        )
+                    )
+                    if not rows:
+                        return "ticket row not found"
+                    row = rows[0]
+                    tid = row[TicketQuery.Ticket.id]
+                    limit = row[TicketQuery.Ticket.uses_limit]
+                    count = row[TicketQuery.Ticket.uses_count]
+                    users = []
+                    try:
+                        users = [
+                            r[TicketQuery.AllowedUsers.user_name]
+                            for r in s.query(TicketQuery.AllowedUsers).filter(
+                                TicketQuery.AllowedUsers.ticket_id == tid
+                            )
+                        ]
+                    except Exception as exc:
+                        users = [f"<query failed: {type(exc).__name__}>"]
+                    return f"uses_limit={limit} uses_count={count} allowed_users={users}"
+            except Exception as exc:
+                return f"<icat read failed: {type(exc).__name__}>"
+
         # 3. Does the ticket delegate to a SEPARATE session? The real test:
         #    an anonymous session holding only the ticket.
         opened, detail = _open_with_ticket()
@@ -279,15 +336,29 @@ def main() -> int:
                         Ticket(s, ticket=ticket_string).modify(
                             "add", "user", args.other_user
                         )
-                    still_open, why = _open_with_ticket()
-                    if still_open:
+                    RESULT["icat_after_user_restriction"] = _icat_state()
+                    still_stat, why = _open_with_ticket()
+                    # A catalog stat may not trigger the check; a real read
+                    # is the access iRODS actually gates.
+                    still_read, why_read = _read_object_with_ticket()
+                    if not still_stat and not still_read:
+                        RESULT["restriction_user_binds"] = f"yes -- now refused ({why})"
+                    elif still_stat and not still_read:
                         RESULT["restriction_user_binds"] = (
-                            f"NO -- accepted, but an anonymous session STILL "
-                            f"opened the collection after pinning to "
-                            f"{args.other_user}"
+                            f"PARTIAL -- collection stat still works, but "
+                            f"reading a data object is now refused "
+                            f"({why_read}). Enforcement is at object access, "
+                            f"not at catalog stat."
                         )
                     else:
-                        RESULT["restriction_user_binds"] = f"yes -- now refused ({why})"
+                        RESULT["restriction_user_binds"] = (
+                            f"NO -- after pinning to {args.other_user}, an "
+                            f"anonymous session still read a data object. "
+                            f"Check icat_after_user_restriction: if "
+                            f"allowed_users is empty the modify was a silent "
+                            f"no-op; if populated, the restriction is "
+                            f"recorded but not enforced."
+                        )
                 except Exception as exc:
                     RESULT["restriction_user_binds"] = (
                         f"not applicable -- modify rejected: {type(exc).__name__}"
@@ -310,18 +381,25 @@ def main() -> int:
                 try:
                     with session() as s:
                         Ticket(s, ticket=ticket_string).modify("uses", "1")
-                    first, _ = _open_with_ticket()
-                    second, why2 = _open_with_ticket()
+                    RESULT["icat_after_uses_limit"] = _icat_state()
+                    # Meter on real object reads: iRODS counts a "use" at
+                    # data-object access, not necessarily at catalog stat.
+                    first, why1 = _read_object_with_ticket()
+                    second, why2 = _read_object_with_ticket()
+                    RESULT["icat_after_two_reads"] = _icat_state()
                     if first and not second:
                         RESULT["restriction_uses_binds"] = f"yes -- spent ({why2})"
                     elif first and second:
                         RESULT["restriction_uses_binds"] = (
-                            "NO -- accepted, but the ticket worked twice with uses=1"
+                            "NO -- two data-object reads succeeded with "
+                            "uses=1. Compare icat_after_uses_limit and "
+                            "icat_after_two_reads: if uses_count did not "
+                            "increment, the zone is not metering this ticket."
                         )
                     else:
                         RESULT["restriction_uses_binds"] = (
-                            "INCONCLUSIVE -- ticket stopped working before the "
-                            "limit could be observed"
+                            f"INCONCLUSIVE -- could not read a data object "
+                            f"({why1}); the limit was never exercised"
                         )
                 except Exception as exc:
                     RESULT["restriction_uses_binds"] = (
