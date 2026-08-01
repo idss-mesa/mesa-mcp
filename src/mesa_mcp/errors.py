@@ -48,3 +48,56 @@ class ToolError(Exception):
 
     def __repr__(self) -> str:  # pragma: no cover - cosmetic
         return f"ToolError(code={self.code!r}, message={self.message!r})"
+
+
+class InputRequired(Exception):
+    """Raised by a handler that needs one more round-trip with the user.
+
+    This is the mesa-mcp side of **Multi Round-Trip Requests** (MCP
+    2026-07-28). The server boundary turns it into an
+    ``InputRequiredResult`` carrying an ``elicitation/create`` form; the
+    client presents the form, and its answer arrives on a follow-up
+    ``tools/call`` as ``inputResponses`` plus the ``requestState`` string
+    handed out here.
+
+    Statelessness constraint
+    ------------------------
+    MRTR under the stateless core has no session to park a continuation
+    in: ``request_state`` is a string that travels **out to the client and
+    back**. Two consequences shape this class:
+
+    * everything needed to resume must fit in ``state`` — a handler may
+      not stash a continuation in process memory, because the follow-up
+      call will routinely land on a different instance;
+    * ``state`` is client-controlled by the time it returns, so the
+      resumed handler must re-validate every value out of it. It carries
+      *what was being asked*, never *what the caller may do* — no
+      authorization decision belongs in it. Path access is re-checked on
+      resume against the caller's live token, not trusted from state.
+
+    Attributes
+    ----------
+    message:
+        Prompt shown to the user alongside the choices.
+    schema:
+        JSON Schema (2020-12) describing the expected answer.
+    state:
+        JSON-serializable dict round-tripped through the client and handed
+        back to the handler on resume.
+    key:
+        Identifier for this elicitation within the request; the client
+        keys its response by the same string.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        schema: dict[str, Any],
+        state: dict[str, Any],
+        key: str = "elicitation",
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.schema = dict(schema)
+        self.state = dict(state)
+        self.key = key

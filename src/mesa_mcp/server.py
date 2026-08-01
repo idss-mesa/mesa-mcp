@@ -31,7 +31,7 @@ from pydantic import BaseModel
 
 from . import __version__
 from .config import Config
-from .errors import ToolError
+from .errors import InputRequired, ToolError
 
 # ---------------------------------------------------------------------------
 # Tool registry
@@ -49,6 +49,70 @@ JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 #: to amortize discovery over, so cacheable list results matter more than
 #: they did pre-2026-07-28.
 TOOLS_LIST_TTL_MS = 300_000
+
+
+#: Cap on the encoded ``requestState`` blob. It round-trips through the
+#: client on every follow-up call, and an unbounded continuation would be
+#: both a wire cost and a decode-side memory risk.
+MAX_REQUEST_STATE_BYTES = 16 * 1024
+
+
+def _encode_request_state(state: dict[str, Any]) -> str:
+    """Serialize an MRTR continuation for the round trip to the client.
+
+    Deliberately **not** signed or encrypted. A signature would need a
+    secret shared by every instance (the follow-up call lands wherever the
+    load balancer sends it), and distributing one buys nothing here:
+    ``request_state`` carries only *what was being asked* — a search query,
+    the candidate terms offered — never an authorization decision. On
+    resume the handler re-derives every privileged fact from the caller's
+    live bearer token, so a tampered blob lets an attacker alter only
+    their own question.
+
+    Anything that would be unsafe to accept back from the client must not
+    be put in here in the first place.
+    """
+    import base64
+    import json
+
+    raw = json.dumps(state, separators=(",", ":")).encode("utf-8")
+    if len(raw) > MAX_REQUEST_STATE_BYTES:
+        raise ToolError(
+            code="internal_error",
+            message="MRTR continuation state is too large to round-trip.",
+            details={"bytes": len(raw), "limit": MAX_REQUEST_STATE_BYTES},
+        )
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def _decode_request_state(encoded: str) -> dict[str, Any]:
+    """Decode a client-returned continuation. Treats input as untrusted."""
+    import base64
+    import binascii
+    import json
+
+    if len(encoded) > MAX_REQUEST_STATE_BYTES * 2:
+        raise ToolError(
+            code="invalid_argument",
+            message="requestState is too large.",
+            details={},
+        )
+    try:
+        raw = base64.urlsafe_b64decode(encoded.encode("ascii"))
+        decoded = json.loads(raw)
+    except (ValueError, binascii.Error) as exc:
+        raise ToolError(
+            code="invalid_argument",
+            message="requestState is not a valid continuation token.",
+            details={},
+        ) from exc
+    if not isinstance(decoded, dict):
+        raise ToolError(
+            code="invalid_argument",
+            message="requestState must decode to an object.",
+            details={},
+        )
+    return decoded
 
 
 def _tool_surface(name: str) -> str:
@@ -210,7 +274,13 @@ def _handler_accepts_kwarg(handler: ToolHandler, name: str) -> bool:
     return False
 
 
-async def _invoke_handler(spec: ToolSpec, raw_args: dict[str, Any] | None) -> dict[str, Any]:
+async def _invoke_handler(
+    spec: ToolSpec,
+    raw_args: dict[str, Any] | None,
+    *,
+    input_responses: dict[str, Any] | None = None,
+    request_state: str | None = None,
+) -> dict[str, Any]:
     """Validate ``raw_args`` against the spec's input model and dispatch.
 
     Centralized so the MCP adapter and the unit tests share one code path.
@@ -228,6 +298,15 @@ async def _invoke_handler(spec: ToolSpec, raw_args: dict[str, Any] | None) -> di
     extra_kwargs: dict[str, Any] = {}
     if _handler_accepts_kwarg(spec.handler, "auth_value"):
         extra_kwargs["auth_value"] = get_current_auth_value()
+
+    # MRTR resume (MCP 2026-07-28). Only handlers that opt in by declaring
+    # these keywords ever see them; the other 49 tools are untouched.
+    if _handler_accepts_kwarg(spec.handler, "elicited"):
+        elicited: dict[str, Any] | None = None
+        if input_responses:
+            state = _decode_request_state(request_state) if request_state else {}
+            elicited = {"responses": input_responses, "state": state}
+        extra_kwargs["elicited"] = elicited
 
     if spec.input_model is None:
         if raw_args:
@@ -271,8 +350,21 @@ class MesaServer:
         if not self.tools:
             self.tools = get_registered_tools()
 
-    async def call(self, name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
-        """In-process tool invocation, used by tests and embedders."""
+    async def call(
+        self,
+        name: str,
+        args: dict[str, Any] | None = None,
+        *,
+        input_responses: dict[str, Any] | None = None,
+        request_state: str | None = None,
+    ) -> dict[str, Any]:
+        """In-process tool invocation, used by tests and embedders.
+
+        ``input_responses`` / ``request_state`` carry an MRTR follow-up
+        (MCP 2026-07-28): the user's answer to an earlier
+        :class:`~mesa_mcp.errors.InputRequired`, plus the continuation
+        this server handed out. Both are absent on a first call.
+        """
         try:
             spec = _REGISTRY[name]
         except KeyError as exc:
@@ -281,7 +373,12 @@ class MesaServer:
                 message=f"No tool registered with name {name!r}.",
                 details={"name": name},
             ) from exc
-        return await _invoke_handler(spec, args)
+        return await _invoke_handler(
+            spec,
+            args,
+            input_responses=input_responses,
+            request_state=request_state,
+        )
 
     async def serve(self, transport: str) -> None:
         """Run the MCP server on the given transport. Imports ``mcp`` lazily."""
@@ -408,7 +505,30 @@ class MesaServer:
 
             is_error = False
             try:
-                payload = await self.call(params.name, params.arguments)
+                payload = await self.call(
+                    params.name,
+                    params.arguments,
+                    input_responses=getattr(params, "input_responses", None),
+                    request_state=getattr(params, "request_state", None),
+                )
+            except InputRequired as pending:
+                # MRTR: hand the question back to the client rather than
+                # guessing or failing. The continuation rides in
+                # requestState because a stateless server has nowhere else
+                # to keep it — the follow-up call may hit another instance.
+                return mcp_types.InputRequiredResult(
+                    inputRequests={
+                        pending.key: mcp_types.ElicitRequest(
+                            method="elicitation/create",
+                            params=mcp_types.ElicitRequestFormParams(
+                                mode="form",
+                                message=pending.message,
+                                requestedSchema=pending.schema,
+                            ),
+                        )
+                    },
+                    requestState=_encode_request_state(pending.state),
+                )
             except ToolError as exc:
                 payload = {"error": exc.to_payload()}
                 is_error = True
