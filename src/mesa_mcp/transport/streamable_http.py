@@ -22,7 +22,7 @@ We just build one around a shared :class:`mcp.server.Server` and let
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
@@ -72,4 +72,49 @@ def build_streamable_http_session_manager(
         app=mcp_server,
         json_response=False,
         stateless=True,
+        security_settings=_transport_security(server.config),
+    )
+
+
+def _transport_security(config: Any) -> Any | None:
+    """Build DNS-rebinding protection settings from config.
+
+    Validating ``Host`` and ``Origin`` matters more under the stateless
+    core: with no session handshake to anchor a connection, every POST is
+    independently trusted, so a rebound DNS name pointing a victim's
+    browser at a locally-bound mesa-mcp would otherwise reach the tool
+    surface directly.
+
+    Returns ``None`` when no allow-list is configured — appropriate behind
+    a reverse proxy that already normalizes ``Host``, and the SDK default.
+    """
+    from mcp.server.transport_security import (  # type: ignore[import-not-found]
+        TransportSecuritySettings,
+    )
+
+    server_config = getattr(config, "server", None)
+    if server_config is None:
+        return None
+
+    hosts = list(getattr(server_config, "allowed_hosts", []) or [])
+    origins = list(getattr(server_config, "allowed_origins", []) or [])
+
+    # The public base URL is by definition a legitimate Host/Origin.
+    public = getattr(server_config, "public_base_url", None)
+    if public:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(public)
+        if parsed.netloc:
+            if parsed.netloc not in hosts:
+                hosts.append(parsed.netloc)
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+            if origin not in origins:
+                origins.append(origin)
+
+    if not hosts and not origins:
+        return None
+    return TransportSecuritySettings(
+        allowed_hosts=hosts,
+        allowed_origins=origins,
     )

@@ -119,6 +119,14 @@ class ServerConfig(BaseModel):
     # loudly on every request.
     oidc_require_audience: bool = True
 
+    # Host/Origin allow-lists for the Streamable HTTP transport
+    # (DNS-rebinding protection). Empty lists leave validation disabled,
+    # which is correct behind a trusted reverse proxy that already
+    # normalizes Host, but should be populated for a directly-exposed
+    # deployment. ``public_base_url``'s host is added automatically.
+    allowed_hosts: list[str] = Field(default_factory=list)
+    allowed_origins: list[str] = Field(default_factory=list)
+
     log_level: LogLevel = "info"
 
 

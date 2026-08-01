@@ -286,6 +286,62 @@ async def test_independent_requests_share_no_session_state(app):
     assert pongs == ["req0", "req1", "req2"]
 
 
+# ---------------------------------------------------------------------------
+# Stateless-era transport hardening
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_forged_host_header_is_rejected_when_allowlisted():
+    """DNS-rebinding protection.
+
+    Matters more under the stateless core: with no session handshake to
+    anchor a connection, every POST is independently trusted, so a rebound
+    DNS name aimed at a locally-bound mesa-mcp would otherwise reach the
+    tool surface directly.
+    """
+    from mesa_mcp.config import ServerConfig
+
+    config = Config(
+        server=ServerConfig(public_base_url="https://mesa-mcp.example.test")
+    )
+    rebind_app = build_sse_app(MesaServer(config=config), config)
+    async with _AppHarness(rebind_app) as client:
+        response = await client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {"_meta": REQUEST_ENVELOPE},
+            },
+            headers={**_headers("tools/list"), "Host": "attacker.example"},
+        )
+    assert response.status_code == 421
+
+
+@pytest.mark.asyncio
+async def test_allowlisted_host_is_accepted():
+    from mesa_mcp.config import ServerConfig
+
+    config = Config(
+        server=ServerConfig(public_base_url="https://mesa-mcp.example.test")
+    )
+    ok_app = build_sse_app(MesaServer(config=config), config)
+    async with _AppHarness(ok_app) as client:
+        response = await client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {"_meta": REQUEST_ENVELOPE},
+            },
+            headers={**_headers("tools/list"), "Host": "mesa-mcp.example.test"},
+        )
+    assert response.status_code == 200
+
+
 @pytest.mark.asyncio
 async def test_mismatched_mcp_name_header_is_rejected(app):
     """Header routing is an integrity check, not just dispatch.
