@@ -114,7 +114,17 @@ class OIDCAuthenticator:
         OAuth client ID of the resource server. Currently only used to
         annotate logs; audience validation uses :attr:`audience`.
     audience:
-        Expected ``aud`` claim. ``None`` disables audience validation.
+        Expected ``aud`` claim — the canonical resource identifier of this
+        deployment (RFC 8707 resource indicator / RFC 9728 ``resource``).
+    require_audience:
+        When ``True`` (default, MCP 2026-07-28 hardening) a missing or
+        mismatched ``aud`` is rejected, and constructing the authenticator
+        without an ``audience`` is a configuration error. When ``False``,
+        audience validation is skipped and every request logs a warning.
+    expected_issuer:
+        Issuer this deployment trusts. When set, the issuer advertised by
+        the discovery document must match it exactly — see
+        :meth:`_get_discovery`.
     http_client:
         Pre-built :class:`httpx.AsyncClient`. When omitted, the
         authenticator creates and owns one. Tests inject a stub.
@@ -125,6 +135,8 @@ class OIDCAuthenticator:
     discovery_url: str
     client_id: str | None = None
     audience: str | None = None
+    require_audience: bool = True
+    expected_issuer: str | None = None
     http_client: httpx.AsyncClient | None = None
     discovery_ttl: float = DEFAULT_DISCOVERY_TTL
     jwks_ttl: float = DEFAULT_JWKS_TTL
@@ -138,6 +150,24 @@ class OIDCAuthenticator:
         if self.http_client is None:
             self.http_client = httpx.AsyncClient(timeout=self.http_timeout)
             self._owns_client = True
+        # Fail fast at construction rather than per request: a server that
+        # cannot bind tokens to itself must not begin accepting them.
+        if self.require_audience and not self.audience:
+            raise ValueError(
+                "OIDCAuthenticator requires an audience when "
+                "require_audience is True. Set server.oidc_audience (or "
+                "server.public_base_url, which supplies the canonical "
+                "resource identifier), or set "
+                "server.oidc_require_audience=false to accept any "
+                "validly-signed token from the realm — which allows a "
+                "token issued for another service to be replayed here."
+            )
+        if not self.require_audience:
+            logger.warning(
+                "audience validation is DISABLED — any validly-signed token "
+                "from this realm is accepted, including tokens minted for "
+                "other services. Set server.oidc_audience to close this."
+            )
 
     # ------------------------------------------------------------------
     # Public API
@@ -168,6 +198,14 @@ class OIDCAuthenticator:
 
         signing_key = _select_signing_key(token, jwks)
 
+        verify_aud = self.require_audience or self.audience is not None
+        required_claims = ["exp", "iss"]
+        if verify_aud:
+            # Force a *present* aud claim: PyJWT's audience check passes
+            # vacuously on a token that simply omits the claim, so
+            # requiring it is what actually binds the token to us.
+            required_claims.append("aud")
+
         try:
             claims = jwt.decode(
                 token,
@@ -179,8 +217,8 @@ class OIDCAuthenticator:
                     "verify_signature": True,
                     "verify_exp": True,
                     "verify_iss": True,
-                    "verify_aud": self.audience is not None,
-                    "require": ["exp", "iss"],
+                    "verify_aud": verify_aud,
+                    "require": required_claims,
                 },
             )
         except ExpiredSignatureError as exc:
@@ -258,6 +296,69 @@ class OIDCAuthenticator:
                 status_code=503,
             )
 
+        # --- Issuer identification (mix-up defense) --------------------
+        #
+        # Everything downstream trusts this document: the ``iss`` we pin
+        # token validation to, and the ``jwks_uri`` we fetch signing keys
+        # from. If a substituted or misconfigured document can name any
+        # issuer it likes, an attacker-controlled authorization server
+        # could have its keys accepted as authoritative for mesa-mcp.
+        #
+        # Two checks close that:
+        #
+        # 1. RFC 8414 §3.3 — the issuer MUST match the URL the metadata
+        #    was retrieved from. This is the standard binding between a
+        #    discovery document and the identity it claims.
+        # 2. An explicit ``expected_issuer`` pin, when configured.
+        issuer = doc["issuer"]
+        if not isinstance(issuer, str) or not issuer:
+            raise OIDCError(
+                "OIDC discovery document has a non-string issuer",
+                status_code=503,
+            )
+
+        derived = _issuer_from_discovery_url(self.discovery_url)
+        if derived is not None and issuer.rstrip("/") != derived.rstrip("/"):
+            logger.error(
+                "OIDC issuer mismatch: discovery URL implies %r but the "
+                "document claims %r — refusing to trust it",
+                derived,
+                issuer,
+            )
+            raise OIDCError(
+                "OIDC discovery issuer does not match its discovery URL",
+                status_code=503,
+            )
+
+        if (
+            self.expected_issuer is not None
+            and issuer.rstrip("/") != self.expected_issuer.rstrip("/")
+        ):
+            logger.error(
+                "OIDC issuer %r does not match the configured expected "
+                "issuer %r — refusing to trust it",
+                issuer,
+                self.expected_issuer,
+            )
+            raise OIDCError(
+                "OIDC discovery issuer does not match the configured issuer",
+                status_code=503,
+            )
+
+        # The JWKS URI must live under the same origin as the issuer, so a
+        # tampered document cannot point key retrieval at a foreign host.
+        if not _same_origin(doc["jwks_uri"], issuer):
+            logger.error(
+                "OIDC jwks_uri %r is not same-origin with issuer %r — "
+                "refusing to fetch signing keys",
+                doc["jwks_uri"],
+                issuer,
+            )
+            raise OIDCError(
+                "OIDC jwks_uri is not same-origin with the issuer",
+                status_code=503,
+            )
+
         self._discovery_cache = _CachedDoc(
             data=doc,
             expires_at=now + self.discovery_ttl,
@@ -297,6 +398,39 @@ class OIDCAuthenticator:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+#: Well-known suffixes a discovery URL may carry. RFC 8414 places the
+#: metadata at ``/.well-known/oauth-authorization-server``; OIDC Discovery
+#: uses ``/.well-known/openid-configuration``. Keycloak also serves the
+#: OIDC form under a realm path.
+_DISCOVERY_SUFFIXES = (
+    "/.well-known/openid-configuration",
+    "/.well-known/oauth-authorization-server",
+)
+
+
+def _issuer_from_discovery_url(discovery_url: str) -> str | None:
+    """Derive the issuer a discovery URL implies (RFC 8414 §3.3).
+
+    Returns ``None`` when the URL uses a non-standard layout we cannot
+    reason about — the caller then skips the derived-issuer check rather
+    than rejecting a legitimate but unusual deployment.
+    """
+    for suffix in _DISCOVERY_SUFFIXES:
+        if discovery_url.endswith(suffix):
+            return discovery_url[: -len(suffix)]
+    return None
+
+
+def _same_origin(url: str, other: str) -> bool:
+    """True when both URLs share scheme, host, and port."""
+    from urllib.parse import urlparse
+
+    a, b = urlparse(url), urlparse(other)
+    if not a.scheme or not a.netloc:
+        return False
+    return (a.scheme, a.hostname, a.port) == (b.scheme, b.hostname, b.port)
 
 
 def _extract_bearer(authorization_header: str | None) -> str:

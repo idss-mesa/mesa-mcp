@@ -70,6 +70,7 @@ from .streamable_http import (
 )
 from .wellknown import (
     PROTECTED_RESOURCE_METADATA_PATH,
+    issuer_from_discovery_url,
     metadata_url,
     oauth_protected_resource_metadata,
 )
@@ -260,10 +261,22 @@ def _build_authenticator(config: Config) -> OIDCAuthenticator | None:
             "OIDC. This is acceptable for local development only."
         )
         return None
+    # Resolve the audience this deployment binds tokens to. Prefer an
+    # explicit setting; otherwise use the canonical resource identifier we
+    # already publish in the RFC 9728 protected-resource metadata, which is
+    # exactly what an RFC 8707 resource indicator names. Keeping the two in
+    # sync means the audience we enforce is the one clients were told to
+    # request.
+    audience = config.server.oidc_audience or config.server.public_base_url
+    if audience:
+        audience = audience.rstrip("/")
+
     return OIDCAuthenticator(
         discovery_url=url,
         client_id=config.server.oauth2_client_id,
-        audience=config.server.oidc_audience,
+        audience=audience,
+        require_audience=config.server.oidc_require_audience,
+        expected_issuer=issuer_from_discovery_url(url),
         http_client=httpx.AsyncClient(timeout=10.0),
     )
 
