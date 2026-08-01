@@ -24,7 +24,9 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "mcp>=1.0",
+    # MCP 2026-07-28 spec (stateless core). SDK 2.x removed the 1.x
+    # decorator registration API, so the lower bound is not optional.
+    "mcp>=2.0,<3",
     "python-irodsclient>=2.0",
     "pydantic>=2.6",
     "pyyaml",

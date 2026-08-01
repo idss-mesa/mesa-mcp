@@ -50,10 +50,20 @@ def build_streamable_http_session_manager(
     pattern is safe here.
 
     ``json_response=False`` keeps the default behavior: the manager picks
-    SSE or single JSON depending on the request shape. ``stateless=False``
-    means client sessions persist across requests (the ``Mcp-Session-Id``
-    header). Stateless mode is appropriate for a Lambda-style serverless
-    deployment but not for our long-running uvicorn process.
+    SSE or single JSON depending on the request shape.
+
+    ``stateless=True`` implements the **MCP 2026-07-28 stateless core**:
+    no ``initialize`` handshake and no ``Mcp-Session-Id``. Every POST is
+    self-contained, so any mesa-mcp instance can answer any request and the
+    hosted deployment scales horizontally behind a plain round-robin load
+    balancer instead of requiring session affinity.
+
+    This is safe for mesa-mcp because the server holds no per-client
+    protocol state: the caller's identity is re-derived from the bearer
+    token on every request by :class:`~mesa_mcp.transport.sse.OIDCMiddleware`,
+    and the iRODS connection pool is keyed by
+    :meth:`~mesa_mcp.auth.models.AuthValue.cache_key` — a per-caller cache,
+    not a per-session one.
     """
     from mcp.server import Server as McpServer
 
@@ -61,5 +71,5 @@ def build_streamable_http_session_manager(
     return StreamableHTTPSessionManager(
         app=mcp_server,
         json_response=False,
-        stateless=False,
+        stateless=True,
     )

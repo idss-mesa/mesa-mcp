@@ -55,7 +55,12 @@ from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from mesa_mcp.auth.models import AuthValue
-from mesa_mcp.context import current_auth_value, current_config
+from mesa_mcp.context import (
+    current_auth_value,
+    current_client_pool,
+    current_config,
+)
+from mesa_mcp.irods.client_pool import default_pool
 
 from .healthz import healthz
 from .oidc import OIDCAuthenticator, OIDCError
@@ -179,6 +184,20 @@ class OIDCMiddleware:
         # Bind the config even for public routes so a future /healthz that
         # reports config-derived facts can read it.
         config_token = current_config.set(self._config)
+        # Bind the iRODS client pool for the duration of the request.
+        #
+        # Required by the MCP 2026-07-28 stateless core: with no session to
+        # carry server-scoped state, every request must arrive at the tool
+        # handlers fully provisioned. Previously only the stdio path bound
+        # this contextvar, so every tool using ``require_current_client_pool``
+        # (ds_list_directory, ds_make_directory, ds_copy_file, …) failed with
+        # ``internal_error`` over HTTP while the ``default_pool()`` tools
+        # worked — an inconsistency this binding removes.
+        #
+        # The pool itself is process-wide and keyed per caller
+        # (``AuthValue.cache_key``), so sharing it across requests and
+        # instances is correct: it is a connection cache, not session state.
+        pool_token = current_client_pool.set(default_pool())
         auth_token = None
         try:
             if _is_public(path):
@@ -228,6 +247,7 @@ class OIDCMiddleware:
         finally:
             if auth_token is not None:
                 current_auth_value.reset(auth_token)
+            current_client_pool.reset(pool_token)
             current_config.reset(config_token)
 
 
@@ -270,6 +290,21 @@ def build_sse_app(server: MesaServer, config: Config) -> Starlette:
     sse_transport = SseServerTransport("/messages/")
 
     async def handle_sse(request: Request) -> Response:
+        # DEPRECATED transport (MCP 2026-07-28).
+        #
+        # The two-endpoint SSE transport (`GET /sse` + `POST /messages/`) is
+        # a pre-stateless-core design: it depends on a long-lived,
+        # session-affine stream, which is exactly what the 2026-07-28 spec
+        # removes. `/mcp` (stateless Streamable HTTP) is the go-forward
+        # transport. This route is retained only so existing `mcp-remote`
+        # bridges keep working through the deprecation window; it pins a
+        # client to one instance and therefore does not scale horizontally.
+        logger.warning(
+            "legacy SSE transport in use (GET /sse); deprecated under MCP "
+            "2026-07-28 — migrate the client to the stateless Streamable "
+            "HTTP endpoint at %s",
+            STREAMABLE_HTTP_PATH,
+        )
         # Build a fresh MCP server per session so the tool registry binds
         # to the right context. Reusing one Server instance across SSE
         # sessions is also fine since our tools are stateless w.r.t. the

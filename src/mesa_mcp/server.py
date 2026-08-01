@@ -39,6 +39,37 @@ from .errors import ToolError
 
 ToolHandler = Callable[..., Awaitable[dict[str, Any]]]
 
+# --- MCP 2026-07-28 spec constants -----------------------------------------
+
+#: JSON Schema dialect the spec pins tool schemas to.
+JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
+
+#: ``tools/list`` cache TTL. The tool surface is fixed at deploy time, so a
+#: 5-minute public TTL is safe. Under the stateless core there is no session
+#: to amortize discovery over, so cacheable list results matter more than
+#: they did pre-2026-07-28.
+TOOLS_LIST_TTL_MS = 300_000
+
+
+def _tool_surface(name: str) -> str:
+    """Classify a tool into its mesa-mcp surface family, for ``_meta``.
+
+    mesa-mcp exposes ~50 tools spanning four subsystems; tagging each with
+    its family lets a client group or filter them without name-prefix
+    guesswork.
+    """
+    if name.startswith(("mesa_ols_", "mesa_avu_apply_term", "mesa_avu_from_term")):
+        return "ontology"
+    if name.startswith("mesa_ducklake_"):
+        return "history"
+    if name.startswith(("mesa_datacite_", "mesa_avu_apply_datacite")):
+        return "datacite"
+    if name.startswith("mesa_policy_"):
+        return "policy"
+    if name.startswith("ds_"):
+        return "irods"
+    return "core"
+
 
 @dataclass(frozen=True)
 class ToolSpec:
@@ -274,6 +305,13 @@ class MesaServer:
         mcp_server = self._build_mcp_server(Server)
         try:
             async with stdio_server() as (read_stream, write_stream):
+                # SDK 2.x ``run()`` drives a *dual-era* loop: the client's
+                # first request selects either the legacy handshake era or
+                # the 2026-07-28 per-request-envelope era. The options object
+                # is therefore no longer an ``initialize`` handshake — it is
+                # the capability/extension declaration the SDK serves to
+                # ``server/discover``. It stays, so a stdio client on either
+                # era works.
                 await mcp_server.run(
                     read_stream,
                     write_stream,
@@ -313,43 +351,89 @@ class MesaServer:
                 await authenticator.aclose()
 
     def _build_mcp_server(self, server_cls: Any) -> Any:
-        """Construct an ``mcp.server.Server`` populated with our tool registry."""
+        """Construct an ``mcp.server.Server`` populated with our tool registry.
+
+        Targets the **MCP 2026-07-28** spec via the ``mcp`` Python SDK 2.x.
+
+        The 1.x decorator API (``@server.list_tools()`` /
+        ``@server.call_tool()``) was removed in SDK 2.0.0; registration now
+        happens through **constructor callbacks** that take a
+        ``ServerRequestContext`` plus typed params and return typed results.
+        The mesa-mcp tool registry itself is unchanged — this adapter is the
+        only SDK-coupled seam.
+
+        Spec features wired here:
+
+        * **Cacheable list results** — ``cache_hints`` makes the SDK stamp
+          ``ttlMs``/``cacheScope`` onto ``tools/list``. Our tool surface is
+          static for the lifetime of a deployment, so a minutes-scale public
+          TTL is safe and saves every client a full re-list per request (which
+          matters much more now that there is no session to amortize it over).
+        * **JSON Schema 2020-12** — tool ``inputSchema`` carries an explicit
+          ``$schema`` dialect declaration.
+        * **Universal ``_meta``** — tool definitions advertise their mesa-mcp
+          surface family so clients can group ~50 tools sensibly.
+
+        ``server/discover`` is handled by the SDK itself; there is no
+        ``initialize`` handshake to configure.
+        """
         from mcp import types as mcp_types  # type: ignore[import-not-found]
+        from mcp.server.caching import CacheHint  # type: ignore[import-not-found]
 
-        mcp_server = server_cls("mesa-mcp")
+        async def _on_list_tools(_ctx: Any, _params: Any = None) -> Any:
+            return mcp_types.ListToolsResult(tools=self._tool_definitions())
 
-        # The mcp Python SDK uses decorators on the Server instance to wire
-        # up the list_tools / call_tool callbacks. We register them here.
-
-        @mcp_server.list_tools()  # type: ignore[misc]
-        async def _list_tools() -> list[Any]:
-            out = []
-            for spec in self.tools:
-                input_schema: dict[str, Any]
-                if spec.input_model is not None:
-                    input_schema = spec.input_model.model_json_schema()
-                else:
-                    input_schema = {"type": "object", "properties": {}}
-                out.append(
-                    mcp_types.Tool(
-                        name=spec.name,
-                        description=spec.description,
-                        inputSchema=input_schema,
-                    )
-                )
-            return out
-
-        @mcp_server.call_tool()  # type: ignore[misc]
-        async def _call_tool(name: str, arguments: dict[str, Any] | None) -> list[Any]:
+        async def _on_call_tool(_ctx: Any, params: Any) -> Any:
             import json
 
+            is_error = False
             try:
-                payload = await self.call(name, arguments)
+                payload = await self.call(params.name, params.arguments)
             except ToolError as exc:
                 payload = {"error": exc.to_payload()}
-            return [mcp_types.TextContent(type="text", text=json.dumps(payload))]
+                is_error = True
+            return mcp_types.CallToolResult(
+                content=[mcp_types.TextContent(type="text", text=json.dumps(payload))],
+                structuredContent=payload,
+                isError=is_error,
+            )
 
-        return mcp_server
+        return server_cls(
+            "mesa-mcp",
+            version=__version__,
+            cache_hints={
+                "tools/list": CacheHint(ttl_ms=TOOLS_LIST_TTL_MS, scope="public"),
+            },
+            on_list_tools=_on_list_tools,
+            on_call_tool=_on_call_tool,
+        )
+
+    def _tool_definitions(self) -> list[Any]:
+        """Render the registry as MCP ``Tool`` objects (spec 2026-07-28).
+
+        Split out from :meth:`_build_mcp_server` so the conformance tests can
+        assert schema dialect and ``_meta`` without standing up a transport.
+        """
+        from mcp import types as mcp_types  # type: ignore[import-not-found]
+
+        out: list[Any] = []
+        for spec in self.tools:
+            if spec.input_model is not None:
+                input_schema = spec.input_model.model_json_schema()
+            else:
+                input_schema = {"type": "object", "properties": {}}
+            # Pydantic v2 emits 2020-12 but omits the dialect declaration;
+            # the spec expects tool schemas to identify their dialect.
+            input_schema.setdefault("$schema", JSON_SCHEMA_DIALECT)
+            out.append(
+                mcp_types.Tool(
+                    name=spec.name,
+                    description=spec.description,
+                    inputSchema=input_schema,
+                    _meta={"io.mesa/surface": _tool_surface(spec.name)},
+                )
+            )
+        return out
 
 
 # ---------------------------------------------------------------------------
