@@ -79,6 +79,11 @@ class ToolSpec:
     description: str
     handler: ToolHandler
     input_model: type[BaseModel] | None = None
+    #: Optional Pydantic model describing the handler's return payload. When
+    #: set, it is published as the tool's ``outputSchema`` (MCP 2026-07-28),
+    #: letting clients validate structured results instead of parsing prose.
+    #: Opt-in per tool: handlers still return plain dicts.
+    output_model: type[BaseModel] | None = None
     # Free-form extras (kept for forward-compat with later wiring needs).
     meta: dict[str, Any] = field(default_factory=dict)
 
@@ -91,6 +96,7 @@ def register_tool(
     description: str,
     *,
     input_model: type[BaseModel] | None = None,
+    output_model: type[BaseModel] | None = None,
 ) -> Callable[[ToolHandler], ToolHandler]:
     """Decorator that adds a tool to the global mesa-mcp tool registry.
 
@@ -109,6 +115,7 @@ def register_tool(
             description=description,
             handler=handler,
             input_model=input_model,
+            output_model=output_model,
         )
         return handler
 
@@ -141,11 +148,24 @@ class DsPingInput(BaseModel):
     message: str | None = None
 
 
+class DsPingOutput(BaseModel):
+    """Output schema for ``ds_ping``.
+
+    Reference implementation of the opt-in ``output_model`` hook: declaring
+    it publishes an ``outputSchema`` (MCP 2026-07-28) so clients can validate
+    the structured result rather than parsing the text block.
+    """
+
+    pong: str
+    version: str
+
+
 @register_tool(
     "ds_ping",
     "Liveness check. Echoes back the supplied message (or 'ok') and the "
     "running mesa-mcp version. No iRODS access required.",
     input_model=DsPingInput,
+    output_model=DsPingOutput,
 )
 async def handle_ds_ping(args: DsPingInput) -> dict[str, Any]:
     """Return a structured pong payload."""
@@ -425,11 +445,16 @@ class MesaServer:
             # Pydantic v2 emits 2020-12 but omits the dialect declaration;
             # the spec expects tool schemas to identify their dialect.
             input_schema.setdefault("$schema", JSON_SCHEMA_DIALECT)
+            output_schema = None
+            if spec.output_model is not None:
+                output_schema = spec.output_model.model_json_schema()
+                output_schema.setdefault("$schema", JSON_SCHEMA_DIALECT)
             out.append(
                 mcp_types.Tool(
                     name=spec.name,
                     description=spec.description,
                     inputSchema=input_schema,
+                    outputSchema=output_schema,
                     _meta={"io.mesa/surface": _tool_surface(spec.name)},
                 )
             )
