@@ -13,10 +13,21 @@ The questions, in order of how much they constrain the design:
 2. Can it issue a ticket for a collection it owns?
 3. Does that ticket work from a **separate session** — i.e. is it a real
    delegation, not just a local no-op?
-4. Do the restrictions bind? Specifically ``user`` (single-user scoping)
-   and ``uses`` (spend limit) — these decide whether a ticket can stand in
-   for per-caller identity.
+4. Do the restrictions **bind**? ``user`` (single-user scoping) and
+   ``uses`` (spend limit) decide whether a ticket can stand in for
+   per-caller identity.
+
+   Each is tested by *observing behaviour change*, not by whether the
+   server accepted the ``modify`` call — applying a restriction proves
+   only that it was accepted. So the probe pins the ticket and then
+   re-tries the anonymous session, and sets ``uses=1`` and then uses the
+   ticket twice.
 5. Can it be revoked?
+
+Check order is load-bearing: delegation (3) is measured on an
+**unrestricted** ticket, *before* any restriction is applied. Applying a
+user restriction first would make a correctly-binding restriction look
+like a broken delegation.
 
 Safety
 ------
@@ -162,41 +173,28 @@ def main() -> int:
                 _report()
                 return 1
 
-            # 4a. Does a `uses` limit apply?
-            try:
-                Ticket(s, ticket=ticket_string).modify("uses", "10")
-                RESULT["restriction_uses"] = "ok"
-            except Exception as exc:
-                RESULT["restriction_uses"] = f"FAILED: {type(exc).__name__}"
+        # ORDERING MATTERS. Delegation is measured on an UNRESTRICTED
+        # ticket first; restrictions are applied only afterwards, so a
+        # binding restriction cannot be misread as "delegation broken".
 
-            # 4b. Does a per-user restriction apply? This is the one that
-            #     decides whether a ticket can carry per-caller identity.
-            if args.other_user:
-                try:
-                    Ticket(s, ticket=ticket_string).modify(
-                        "add", "user", args.other_user
-                    )
-                    RESULT["restriction_user"] = "ok"
-                except Exception as exc:
-                    RESULT["restriction_user"] = f"FAILED: {type(exc).__name__}"
-            else:
-                RESULT["restriction_user"] = "skipped (pass --other-user to test)"
+        def _open_with_ticket() -> tuple[bool, str]:
+            """Try to read the collection from an anonymous ticket session."""
+            try:
+                with anon_session() as anon:
+                    Ticket(anon, ticket=ticket_string).supply()
+                    c = anon.collections.get(args.collection)
+                    return True, f"{len(c.data_objects) + len(c.subcollections)} entries"
+            except Exception as exc:
+                return False, f"{type(exc).__name__}"
 
         # 3. Does the ticket delegate to a SEPARATE session? The real test:
         #    an anonymous session holding only the ticket.
-        try:
-            with anon_session() as anon:
-                Ticket(anon, ticket=ticket_string).supply()
-                c = anon.collections.get(args.collection)
-                RESULT["ticket_works_in_separate_session"] = "ok"
-                RESULT["ticket_saw_entries"] = len(c.data_objects) + len(c.subcollections)
-        except Exception as exc:
-            RESULT["ticket_works_in_separate_session"] = (
-                f"FAILED: {type(exc).__name__}: {exc}"
-            )
+        opened, detail = _open_with_ticket()
+        RESULT["ticket_works_in_separate_session"] = "ok" if opened else f"FAILED: {detail}"
+        if opened:
+            RESULT["ticket_saw"] = detail
 
-        # 3b. Does the ticket LEAK beyond its collection? A ticket scoped to
-        #     one collection must not open the user's home.
+        # 3b. Does the ticket LEAK beyond its collection?
         try:
             with anon_session() as anon:
                 Ticket(anon, ticket=ticket_string).supply()
@@ -206,6 +204,74 @@ def main() -> int:
             )
         except Exception as exc:
             RESULT["ticket_scope_contained"] = f"yes ({type(exc).__name__})"
+
+        # 4. Do restrictions BIND? Applying a restriction only proves the
+        #    server accepted the modify call. Each check below therefore
+        #    applies the restriction and then RE-EXERCISES the ticket to
+        #    observe whether behaviour actually changed.
+        if not opened:
+            RESULT["restriction_user_binds"] = (
+                "INCONCLUSIVE -- ticket did not delegate, nothing to restrict"
+            )
+            RESULT["restriction_uses_binds"] = "INCONCLUSIVE -- same"
+        else:
+            # 4a. Per-user restriction. THE decisive check for per-caller
+            #     identity: after pinning the ticket to another user, an
+            #     anonymous session must NO LONGER be able to use it.
+            if args.other_user:
+                try:
+                    with session() as s:
+                        Ticket(s, ticket=ticket_string).modify(
+                            "add", "user", args.other_user
+                        )
+                    still_open, why = _open_with_ticket()
+                    if still_open:
+                        RESULT["restriction_user_binds"] = (
+                            f"NO -- accepted, but an anonymous session STILL "
+                            f"opened the collection after pinning to "
+                            f"{args.other_user}"
+                        )
+                    else:
+                        RESULT["restriction_user_binds"] = f"yes -- now refused ({why})"
+                except Exception as exc:
+                    RESULT["restriction_user_binds"] = (
+                        f"not applicable -- modify rejected: {type(exc).__name__}"
+                    )
+            else:
+                RESULT["restriction_user_binds"] = (
+                    "skipped (pass --other-user to test the decisive check)"
+                )
+
+            # 4b. Spend limit. Set uses to 1 and use it twice: the second
+            #     attempt must fail. Only run when the ticket is still
+            #     usable — a bound user-restriction above already closed it.
+            usable, _ = _open_with_ticket()
+            if not usable:
+                RESULT["restriction_uses_binds"] = (
+                    "INCONCLUSIVE -- ticket already closed by the user "
+                    "restriction above"
+                )
+            else:
+                try:
+                    with session() as s:
+                        Ticket(s, ticket=ticket_string).modify("uses", "1")
+                    first, _ = _open_with_ticket()
+                    second, why2 = _open_with_ticket()
+                    if first and not second:
+                        RESULT["restriction_uses_binds"] = f"yes -- spent ({why2})"
+                    elif first and second:
+                        RESULT["restriction_uses_binds"] = (
+                            "NO -- accepted, but the ticket worked twice with uses=1"
+                        )
+                    else:
+                        RESULT["restriction_uses_binds"] = (
+                            "INCONCLUSIVE -- ticket stopped working before the "
+                            "limit could be observed"
+                        )
+                except Exception as exc:
+                    RESULT["restriction_uses_binds"] = (
+                        f"not applicable -- modify rejected: {type(exc).__name__}"
+                    )
 
     finally:
         # 5. Always revoke, even if a check above raised.
