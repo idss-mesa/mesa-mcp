@@ -224,15 +224,30 @@ def main() -> int:
                 RESULT["ticket_saw"] = detail
 
         # 3b. Does the ticket LEAK beyond its collection?
-        try:
-            with anon_session() as anon:
-                Ticket(anon, ticket=ticket_string).supply()
-                anon.collections.get(f"/{zone}/home/{args.user}")
+        #
+        # Only meaningful once the ticket is known to grant something: if
+        # the ticket opens nothing, "it didn't open your home either" is
+        # trivially true and proves no containment.
+        #
+        # A DoesNotExist here is the CORRECT pass, not a suspicious one --
+        # a ticket-mediated session restricts the visible namespace, so an
+        # out-of-scope path legitimately fails to resolve rather than
+        # returning a permission error.
+        if not opened:
             RESULT["ticket_scope_contained"] = (
-                f"NO -- ticket also opened /{zone}/home/{args.user}"
+                "INCONCLUSIVE -- ticket granted no access, so containment "
+                "is untested"
             )
-        except Exception as exc:
-            RESULT["ticket_scope_contained"] = f"yes ({type(exc).__name__})"
+        else:
+            try:
+                with anon_session() as anon:
+                    Ticket(anon, ticket=ticket_string).supply()
+                    anon.collections.get(f"/{zone}/home/{args.user}")
+                RESULT["ticket_scope_contained"] = (
+                    f"NO -- ticket also opened /{zone}/home/{args.user}"
+                )
+            except Exception as exc:
+                RESULT["ticket_scope_contained"] = f"yes ({type(exc).__name__})"
 
         # 4. Do restrictions BIND? Applying a restriction only proves the
         #    server accepted the modify call. Each check below therefore
