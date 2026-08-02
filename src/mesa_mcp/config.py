@@ -109,16 +109,17 @@ class ServerConfig(BaseModel):
     # Optional CyVerse Keycloak OIDC settings — only required when serving
     # the HTTP/SSE transport.
     oidc_discovery_url: str | None = None
-    # Both UNUSED. mesa-mcp is an OAuth *resource server*: it validates
-    # inbound JWTs and never runs the authorization-code flow, so it needs
-    # no client credentials. Token validation binds on ``oidc_audience``.
-    #
-    # ``oauth2_client_secret`` in particular should not be set: populating
-    # it puts a live secret in a config file for no benefit, widening the
-    # blast radius of a leaked deployment config. Both are retained so an
-    # existing YAML keeps loading, and are candidates for removal.
+    # UNUSED. mesa-mcp is an OAuth *resource server*: it validates inbound
+    # JWTs and never runs the authorization-code flow, so it needs no
+    # client credentials. Token validation binds on ``oidc_audience``.
+    # Retained so an existing YAML keeps loading; a candidate for removal.
     oauth2_client_id: str | None = None
-    oauth2_client_secret: str | None = None
+    # ``oauth2_client_secret`` was REMOVED. It was never read, and a
+    # resource server has no use for one — setting it put a live secret
+    # in a config file (and in the process environment) for no benefit,
+    # widening the blast radius of a leaked deployment config. The
+    # unknown-key warning in ``load_config`` makes the removal visible to
+    # operators whose YAML still carries it.
     # Expected ``aud`` claim for inbound JWTs. When left ``None`` the
     # authenticator falls back to ``public_base_url`` — the canonical
     # resource identifier this server publishes in its RFC 9728
@@ -273,12 +274,19 @@ def load_config(
     merged = _deep_merge(yaml_layer, env_layer)
     merged = _deep_merge(merged, flag_layer)
 
-    _warn_unknown_keys(yaml_layer)
+    _warn_unknown_keys(yaml_layer, source="config file")
+    # The env layer needs the same check. Operators were previously told
+    # to inject oauth2_client_secret as MESA_MCP_SERVER__OAUTH2_CLIENT_SECRET;
+    # now that the field is gone, an unwarned env var would be dropped in
+    # silence — exactly the failure this warning exists to prevent.
+    _warn_unknown_keys(env_layer, source="environment")
     return Config.model_validate(merged)
 
 
-def _warn_unknown_keys(yaml_layer: dict[str, Any], _prefix: str = "") -> None:
-    """Log a warning for YAML keys no model field will consume.
+def _warn_unknown_keys(
+    yaml_layer: dict[str, Any], *, source: str = "config file"
+) -> None:
+    """Log a warning for keys no model field will consume.
 
     Pydantic's default is to ignore unknown keys, so a typo
     (``shared_dir`` for ``shared_dir_name``) or a setting removed in a
@@ -299,17 +307,20 @@ def _warn_unknown_keys(yaml_layer: dict[str, Any], _prefix: str = "") -> None:
         model = section_models.get(section)
         if model is None:
             if section not in Config.model_fields:
-                logger.warning("config: unknown section %r ignored", section)
+                logger.warning(
+                    "config: unknown section %r in %s ignored", section, source
+                )
             continue
         if not isinstance(values, dict):
             continue
         unknown = sorted(set(values) - set(model.model_fields))
         for key in unknown:
             logger.warning(
-                "config: unknown key %r in section %r ignored "
+                "config: unknown key %r in section %r from %s ignored "
                 "(check spelling, or it may have been removed)",
                 key,
                 section,
+                source,
             )
 
 

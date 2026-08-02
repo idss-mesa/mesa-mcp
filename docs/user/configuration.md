@@ -109,7 +109,7 @@ and every method raises `NotImplementedError`.
 | `bind_port`           | `8080`                 | Reserved for the SSE transport.                                                                            |
 | `oidc_discovery_url`  | *(empty)*              | CyVerse Keycloak discovery URL — required only once SSE lands.                                             |
 | `oauth2_client_id`    | *(empty)*              | Keycloak client id.                                                                                        |
-| `oauth2_client_secret`| *(empty)*              | Keycloak client secret. Inject via env, not YAML.                                                          |
+
 | `log_level`           | `info`                 | One of `debug`, `info`, `warning`, `error`, `critical`.                                                    |
 
 ## CLI flags

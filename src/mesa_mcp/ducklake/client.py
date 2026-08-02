@@ -21,6 +21,7 @@ Public entry points:
 
 from __future__ import annotations
 
+import inspect
 import logging
 import time
 from typing import TYPE_CHECKING, Any, Literal
@@ -37,6 +38,11 @@ if TYPE_CHECKING:
 # catalog DSN left unset) never hit the import.
 
 logger = structlog.get_logger(__name__)
+
+#: Must match ``mesa_ducklake.irods_path.DEFAULT_DATA_COLLECTION``. Kept
+#: as a literal rather than imported so this module stays importable when
+#: the optional mesa-ducklake dependency is absent.
+DEFAULT_DATA_COLLECTION = ".mesa/ducklake"
 _stdlib_logger = logging.getLogger(__name__)
 
 
@@ -93,6 +99,20 @@ def get_default_client() -> Any | None:
     }
     if config.ducklake.cache_dir:
         client_kwargs["cache_dir"] = config.ducklake.cache_dir
+    # Only forward a non-default data_collection, and only to a client
+    # that accepts it — mesa-ducklake is an optional dependency and an
+    # older pin would reject the keyword.
+    data_collection = config.ducklake.data_collection
+    if data_collection and data_collection != DEFAULT_DATA_COLLECTION:
+        if "data_collection" in inspect.signature(_RealClient).parameters:
+            client_kwargs["data_collection"] = data_collection
+        else:
+            logger.warning(
+                "ducklake.data_collection=%r ignored: the installed "
+                "mesa-ducklake does not support it (needs the release that "
+                "added DuckLakeClient(data_collection=...))",
+                data_collection,
+            )
     _default_client = _RealClient(**client_kwargs)
     _default_client_initialised = True
     return _default_client
