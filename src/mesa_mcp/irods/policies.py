@@ -63,6 +63,16 @@ def get_pcf_policy_config(_session: Any, policy_name: str) -> dict[str, Any]:
 def list_mesa_policies(session: Any, project_path: str) -> list[dict[str, Any]]:
     """Return the MESA-specific policy AVUs on a project root collection.
 
+    .. note::
+
+       **Not exposed as a tool.** ``ds_list_policies`` calls
+       :func:`list_pcf_policies` (a stub that reports PCF config is not
+       introspectable via PRC), so MESA's own ``mesa.policy.*`` AVUs —
+       which this function reads and :func:`set_mesa_policy` writes — are
+       unreachable over MCP. Exposing them is a small addition and
+       probably what a caller asking about "policies" expects; it is
+       recorded here rather than silently left dangling.
+
     Walks the AVUs whose attribute starts with ``mesa.policy.`` and
     returns ``{name, enabled, value}`` triples. Values other than
     ``"true"`` are reported with ``enabled=False`` so admins can tell

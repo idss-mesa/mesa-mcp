@@ -41,6 +41,9 @@ _TTL_1H = 3600
 # pick a generous upper bound so a busy MCP process won't grow unbounded.
 _CACHE_MAXSIZE = 4096
 
+# HTTP timeout when the caller supplies none. Also ported from the portal.
+_DEFAULT_TIMEOUT = 15
+
 
 class OLSAPIError(Exception):
     """Custom exception for OLS API errors."""
@@ -58,18 +61,42 @@ class OLSClient:
     session/retry pattern as the portal's ``DataCiteClient``.
     """
 
-    def __init__(self, base_url: str | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str | None = None,
+        *,
+        ontology_cache_ttl: int | None = None,
+        term_cache_ttl: int | None = None,
+        search_cache_ttl: int | None = None,
+        request_timeout: float | None = None,
+    ) -> None:
+        """Construct a client.
+
+        The TTL and timeout keywords exist so ``OLSConfig`` is actually
+        honoured. They previously did not: the class hardcoded the values
+        ported from esiil-portal while ``OLSConfig`` advertised different
+        ones, so an operator who set ``search_cache_ttl: 60`` silently got
+        3600. Omitted arguments keep the ported defaults.
+        """
         self.base_url = (base_url or OLS_BASE_URL).rstrip("/")
-        self.timeout = 15
+        self.timeout = _DEFAULT_TIMEOUT if request_timeout is None else request_timeout
+
+        ontology_ttl = _TTL_24H if ontology_cache_ttl is None else ontology_cache_ttl
+        term_ttl = _TTL_24H if term_cache_ttl is None else term_cache_ttl
+        search_ttl = _TTL_1H if search_cache_ttl is None else search_cache_ttl
 
         # Per-instance TTL caches. The portal's single Django cache becomes
         # one cache per logical purpose so we can preserve the original TTLs.
-        self._cache_catalog: TTLCache = TTLCache(maxsize=_CACHE_MAXSIZE, ttl=_TTL_24H)
-        self._cache_ontology: TTLCache = TTLCache(maxsize=_CACHE_MAXSIZE, ttl=_TTL_24H)
-        self._cache_search: TTLCache = TTLCache(maxsize=_CACHE_MAXSIZE, ttl=_TTL_1H)
-        self._cache_term: TTLCache = TTLCache(maxsize=_CACHE_MAXSIZE, ttl=_TTL_24H)
+        self._cache_catalog: TTLCache = TTLCache(maxsize=_CACHE_MAXSIZE, ttl=ontology_ttl)
+        self._cache_ontology: TTLCache = TTLCache(
+            maxsize=_CACHE_MAXSIZE, ttl=ontology_ttl
+        )
+        self._cache_search: TTLCache = TTLCache(maxsize=_CACHE_MAXSIZE, ttl=search_ttl)
+        self._cache_term: TTLCache = TTLCache(maxsize=_CACHE_MAXSIZE, ttl=term_ttl)
         self._cache_children: TTLCache = TTLCache(maxsize=_CACHE_MAXSIZE, ttl=_TTL_12H)
-        self._cache_desc_search: TTLCache = TTLCache(maxsize=_CACHE_MAXSIZE, ttl=_TTL_1H)
+        self._cache_desc_search: TTLCache = TTLCache(
+            maxsize=_CACHE_MAXSIZE, ttl=search_ttl
+        )
         self._cache_template: TTLCache = TTLCache(maxsize=_CACHE_MAXSIZE, ttl=_TTL_24H)
 
         self.session = requests.Session()
@@ -747,5 +774,22 @@ def _truncate(text: str, length: int) -> str:
 
 
 def get_ols_client() -> OLSClient:
-    """Return a new :class:`OLSClient` instance. Always available (no config needed)."""
-    return OLSClient()
+    """Return a new :class:`OLSClient` built from the active configuration.
+
+    Falls back to the ported defaults when no config is bound, so this
+    stays usable outside a request context (tests, scripts).
+    """
+    try:
+        from mesa_mcp.config import get_active_config
+
+        ols = get_active_config().ols
+    except Exception:
+        return OLSClient()
+
+    return OLSClient(
+        base_url=ols.base_url or None,
+        ontology_cache_ttl=ols.ontology_cache_ttl,
+        term_cache_ttl=ols.term_cache_ttl,
+        search_cache_ttl=ols.search_cache_ttl,
+        request_timeout=ols.request_timeout,
+    )

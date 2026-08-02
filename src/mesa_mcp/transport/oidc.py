@@ -112,8 +112,12 @@ class OIDCAuthenticator:
     discovery_url:
         Full URL to the realm's ``.well-known/openid-configuration``.
     client_id:
-        OAuth client ID of the resource server. Currently only used to
-        annotate logs; audience validation uses :attr:`audience`.
+        OAuth client ID of the resource server. **Unused.** The docstring
+        previously claimed it annotated logs; it does not — nothing reads
+        this attribute. Token validation binds on :attr:`audience` (RFC
+        8707 / RFC 9728), which is the correct control for a resource
+        server. Retained only so an operator's existing YAML keeps
+        loading.
     audience:
         Expected ``aud`` claim — the canonical resource identifier of this
         deployment (RFC 8707 resource indicator / RFC 9728 ``resource``).

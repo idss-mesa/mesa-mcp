@@ -14,12 +14,15 @@ problem.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 Transport = Literal["stdio", "sse"]
 LogLevel = Literal["debug", "info", "warning", "error", "critical"]
@@ -45,7 +48,11 @@ class IRODSConfig(BaseModel):
 class OLSConfig(BaseModel):
     """EMBL-EBI Ontology Lookup Service settings."""
 
-    base_url: str = "https://www.ebi.ac.uk/ols4/api"
+    # NOTE the ``/v2``. Every endpoint is built by appending to this value,
+    # and the OLS4 v1 API does not serve them. This default was previously
+    # ``.../ols4/api`` — harmless only because nothing read the field; the
+    # moment it was honoured, that value broke every OLS call.
+    base_url: str = "https://www.ebi.ac.uk/ols4/api/v2"
     # Cache TTLs in seconds. Tuned for the OLS code ported from esiil-portal.
     ontology_cache_ttl: int = 3600
     term_cache_ttl: int = 600
@@ -60,6 +67,12 @@ class DuckLakeConfig(BaseModel):
     # AVU writes still succeed but are not recorded.
     catalog_dsn: str | None = None
     # iRODS sub-collection (per project) that holds the Parquet data files.
+    #
+    # NOT IMPLEMENTED. Nothing in mesa-mcp or mesa-ducklake reads this, so
+    # setting it has no effect and the layout is whatever mesa-ducklake
+    # chooses. Retained because the field is part of the documented config
+    # surface and removing it would silently ignore an operator's YAML;
+    # wire it through mesa_ducklake before treating it as live.
     data_collection: str = ".mesa/ducklake"
     # Local Parquet cache directory. mesa-ducklake materializes each
     # snapshot's Parquet here before pushing to iRODS; reads pull
@@ -96,6 +109,14 @@ class ServerConfig(BaseModel):
     # Optional CyVerse Keycloak OIDC settings — only required when serving
     # the HTTP/SSE transport.
     oidc_discovery_url: str | None = None
+    # Both UNUSED. mesa-mcp is an OAuth *resource server*: it validates
+    # inbound JWTs and never runs the authorization-code flow, so it needs
+    # no client credentials. Token validation binds on ``oidc_audience``.
+    #
+    # ``oauth2_client_secret`` in particular should not be set: populating
+    # it puts a live secret in a config file for no benefit, widening the
+    # blast radius of a leaked deployment config. Both are retained so an
+    # existing YAML keeps loading, and are candidates for removal.
     oauth2_client_id: str | None = None
     oauth2_client_secret: str | None = None
     # Expected ``aud`` claim for inbound JWTs. When left ``None`` the
@@ -252,7 +273,44 @@ def load_config(
     merged = _deep_merge(yaml_layer, env_layer)
     merged = _deep_merge(merged, flag_layer)
 
+    _warn_unknown_keys(yaml_layer)
     return Config.model_validate(merged)
+
+
+def _warn_unknown_keys(yaml_layer: dict[str, Any], _prefix: str = "") -> None:
+    """Log a warning for YAML keys no model field will consume.
+
+    Pydantic's default is to ignore unknown keys, so a typo
+    (``shared_dir`` for ``shared_dir_name``) or a setting removed in a
+    later release is accepted in silence and the operator's intent is
+    dropped. We warn rather than raise: failing to start over a stale key
+    is worse than running with a documented default.
+    """
+    if not yaml_layer:
+        return
+
+    section_models = {
+        "irods": IRODSConfig,
+        "ols": OLSConfig,
+        "ducklake": DuckLakeConfig,
+        "server": ServerConfig,
+    }
+    for section, values in yaml_layer.items():
+        model = section_models.get(section)
+        if model is None:
+            if section not in Config.model_fields:
+                logger.warning("config: unknown section %r ignored", section)
+            continue
+        if not isinstance(values, dict):
+            continue
+        unknown = sorted(set(values) - set(model.model_fields))
+        for key in unknown:
+            logger.warning(
+                "config: unknown key %r in section %r ignored "
+                "(check spelling, or it may have been removed)",
+                key,
+                section,
+            )
 
 
 # ---------------------------------------------------------------------------
