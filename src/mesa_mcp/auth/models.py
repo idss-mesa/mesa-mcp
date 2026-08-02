@@ -47,6 +47,11 @@ class AuthValue(BaseModel):
     ticket: str | None = None
     home_path: str = ""
     shared_path: str = ""
+    #: Name of the zone's shared collection under ``/<zone>/home``. Mirrors
+    #: ``IRODSConfig.shared_dir_name``; extractors that have a Config pass
+    #: it through so a zone that does not call its shared tree "shared" is
+    #: still reachable. Ignored when ``shared_path`` is supplied directly.
+    shared_dir_name: str = "shared"
 
     @model_validator(mode="after")
     def _derive_paths(self) -> AuthValue:
@@ -60,7 +65,8 @@ class AuthValue(BaseModel):
                 home = f"/{self.zone}/home/{self.username}"
             object.__setattr__(self, "home_path", home)
         if not self.shared_path:
-            object.__setattr__(self, "shared_path", f"/{self.zone}/home/shared")
+            shared = (self.shared_dir_name or "shared").strip("/")
+            object.__setattr__(self, "shared_path", f"/{self.zone}/home/{shared}")
         return self
 
     # ------------------------------------------------------------------

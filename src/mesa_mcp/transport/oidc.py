@@ -179,6 +179,7 @@ class OIDCAuthenticator:
         authorization_header: str | None,
         *,
         zone: str = "",
+        shared_dir_name: str = "shared",
     ) -> AuthValue:
         """Verify ``Authorization`` and return the caller's :class:`AuthValue`.
 
@@ -192,6 +193,10 @@ class OIDCAuthenticator:
             iRODS zone to embed in the returned :class:`AuthValue`. Keycloak
             tokens don't carry an iRODS zone claim, so the caller (transport
             layer) pulls it from :class:`mesa_mcp.config.Config`.
+        shared_dir_name:
+            Name of the zone's shared collection under ``/<zone>/home``.
+            Also config-derived — a zone whose shared tree is not literally
+            called ``shared`` would otherwise be unreachable.
         """
         token = _extract_bearer(authorization_header)
         discovery = await self._get_discovery()
@@ -264,6 +269,7 @@ class OIDCAuthenticator:
             zone=zone,
             password=None,
             auth_scheme="native",
+            shared_dir_name=shared_dir_name or "shared",
         )
 
     async def aclose(self) -> None:

@@ -93,6 +93,7 @@ def extract_from_env(
         auth_scheme=scheme,  # type: ignore[arg-type]
         proxy_user=env_proxy,
         ticket=env_ticket,
+        shared_dir_name=config.irods.shared_dir_name,
     )
 
 
@@ -257,4 +258,5 @@ def extract_from_headers(
         zone=config.irods.zone,
         password=None,
         auth_scheme="native",
+        shared_dir_name=config.irods.shared_dir_name,
     )

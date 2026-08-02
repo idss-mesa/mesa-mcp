@@ -32,6 +32,7 @@ class _FakeAuthenticator:
         authorization_header: str | None,
         *,
         zone: str = "",
+        shared_dir_name: str = "shared",
     ) -> AuthValue:
         if not authorization_header:
             raise OIDCError("missing Authorization header", status_code=401)
