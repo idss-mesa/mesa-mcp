@@ -124,8 +124,9 @@ To enable SSE on a fresh host:
    URL (e.g. `https://kc.cyverse.org/auth/realms/CyVerse/.well-known/openid-configuration`).
 4. Optionally set `MESA_MCP_SERVER__OIDC_AUDIENCE` to lock tokens to a
    specific `aud` claim.
-5. Provision the Keycloak client(s) and stash the secret as
-   `MESA_MCP_SERVER__OAUTH2_CLIENT_SECRET`. See [OIDC](./oidc.md).
+5. Provision the Keycloak client(s). No client secret is needed —
+   mesa-mcp validates inbound JWTs and never runs the
+   authorization-code flow. See [OIDC](./oidc.md).
 6. Restart mesa-mcp and probe the four routes in the table above with
    `curl`.
 

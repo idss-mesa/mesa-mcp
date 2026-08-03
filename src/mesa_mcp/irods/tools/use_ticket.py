@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from mesa_mcp.auth.models import AuthValue
 from mesa_mcp.context import current_ticket, require_current_auth_value
 from mesa_mcp.errors import ToolError
+from mesa_mcp.irods import ticket_errors
 from mesa_mcp.irods.client_pool import default_pool
 from mesa_mcp.server import register_tool
 
@@ -70,10 +71,16 @@ async def handle_use_ticket(
     try:
         Ticket(sess, ticket=args.ticket).supply()
     except Exception as exc:  # noqa: BLE001 - PRC error hierarchy varies
+        # A restricted ticket surfaces as an unmapped KeyError(<code>) in
+        # python-irodsclient; translate it into something the caller can
+        # act on rather than reporting the bare number.
+        mapped = ticket_errors.as_tool_error(exc, context="Failed to bind ticket")
+        if mapped is not None:
+            raise mapped from exc
         raise ToolError(
             code="irods_error",
-            message=f"Failed to bind ticket {args.ticket!r}: {exc}",
-            details={"ticket": args.ticket},
+            message=f"Failed to bind ticket: {exc}",
+            details={},
         ) from exc
 
     current_ticket.set(args.ticket)

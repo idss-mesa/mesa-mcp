@@ -228,6 +228,7 @@ class OIDCMiddleware:
                 auth_value = await self._authenticator.authenticate(
                     headers.get("authorization"),
                     zone=self._config.irods.zone,
+                    shared_dir_name=self._config.irods.shared_dir_name,
                 )
             except OIDCError as exc:
                 response_headers: dict[str, str] = {}

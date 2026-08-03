@@ -112,8 +112,12 @@ class OIDCAuthenticator:
     discovery_url:
         Full URL to the realm's ``.well-known/openid-configuration``.
     client_id:
-        OAuth client ID of the resource server. Currently only used to
-        annotate logs; audience validation uses :attr:`audience`.
+        OAuth client ID of the resource server. **Unused.** The docstring
+        previously claimed it annotated logs; it does not — nothing reads
+        this attribute. Token validation binds on :attr:`audience` (RFC
+        8707 / RFC 9728), which is the correct control for a resource
+        server. Retained only so an operator's existing YAML keeps
+        loading.
     audience:
         Expected ``aud`` claim — the canonical resource identifier of this
         deployment (RFC 8707 resource indicator / RFC 9728 ``resource``).
@@ -179,6 +183,7 @@ class OIDCAuthenticator:
         authorization_header: str | None,
         *,
         zone: str = "",
+        shared_dir_name: str = "shared",
     ) -> AuthValue:
         """Verify ``Authorization`` and return the caller's :class:`AuthValue`.
 
@@ -192,6 +197,10 @@ class OIDCAuthenticator:
             iRODS zone to embed in the returned :class:`AuthValue`. Keycloak
             tokens don't carry an iRODS zone claim, so the caller (transport
             layer) pulls it from :class:`mesa_mcp.config.Config`.
+        shared_dir_name:
+            Name of the zone's shared collection under ``/<zone>/home``.
+            Also config-derived — a zone whose shared tree is not literally
+            called ``shared`` would otherwise be unreachable.
         """
         token = _extract_bearer(authorization_header)
         discovery = await self._get_discovery()
@@ -264,6 +273,7 @@ class OIDCAuthenticator:
             zone=zone,
             password=None,
             auth_scheme="native",
+            shared_dir_name=shared_dir_name or "shared",
         )
 
     async def aclose(self) -> None:

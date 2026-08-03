@@ -62,8 +62,9 @@ off the OIDC username.
    # Uncomment under the `server:` block:
    #   oidc_discovery_url: https://kc.cyverse.org/auth/realms/CyVerse/.well-known/openid-configuration
    #   oauth2_client_id: <client_id>
-   #   oauth2_client_secret: <client_secret>
    #   oidc_audience: mesa-mcp        # optional; matches `aud` claim
+   # No client secret: mesa-mcp validates inbound JWTs and never runs
+   # the authorization-code flow.
    ```
 3. **Restart and verify:**
    ```bash

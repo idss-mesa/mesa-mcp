@@ -41,7 +41,10 @@ server:
   public_base_url: https://mesa-mcp.example.org
   oidc_discovery_url: https://kc.cyverse.org/auth/realms/CyVerse/.well-known/openid-configuration
   oauth2_client_id: mesa-mcp
-  # oauth2_client_secret comes from the env, not the YAML.
+  # No client secret. mesa-mcp is a resource server: it validates
+  # inbound JWTs and never runs the authorization-code flow, so it has
+  # no use for one. `oauth2_client_secret` was removed; setting it now
+  # logs an "unknown key" warning and is ignored.
   # oidc_audience: mesa-mcp     # uncomment for strict aud check
 ```
 
@@ -53,8 +56,11 @@ MESA_MCP_SERVER__TRANSPORT=sse
 MESA_MCP_SERVER__PUBLIC_BASE_URL=https://mesa-mcp.example.org
 MESA_MCP_SERVER__OIDC_DISCOVERY_URL=https://kc.cyverse.org/auth/realms/CyVerse/.well-known/openid-configuration
 MESA_MCP_SERVER__OAUTH2_CLIENT_ID=mesa-mcp
-MESA_MCP_SERVER__OAUTH2_CLIENT_SECRET=PLEASE_INJECT_FROM_SECRET_STORE
 ```
+
+There is deliberately no client-secret variable here. A resource server
+validating bearer tokens needs no client credentials, so injecting one
+would place a live secret in the unit's environment for no benefit.
 
 The Keycloak adapter JSON file (downloaded from the Keycloak admin
 console after the client is created) is the canonical source for the
