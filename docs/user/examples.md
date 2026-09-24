@@ -170,22 +170,21 @@ This is the same function that drives `esiil-portal`'s auto-generated
 metadata forms. Use it to expose a structured form to an end user without
 hand-writing the schema.
 
-## Planned: ticket-based workflow
-
-When the ticket lifecycle tools land, the intended flow looks like this:
+## Ticket-based workflow
 
 ```text
 ds_create_ticket     -> mint a read-or-write ticket against a path
-ds_use_ticket        -> open a ticket-mediated session on the MCP server
-ds_read_file / ds_add_avu / ... -> tools run as the ticket bearer
+ds_use_ticket        -> supply the ticket to your pooled iRODS session
+ds_read_file / ds_add_avu / ... -> later calls by you run with the ticket applied
 ds_modify_ticket     -> tighten uses, expiry, or host restrictions
 ds_delete_ticket     -> revoke
 ```
 
-Every ticket-mediated AVU write will be recorded into DuckLake with a
-`via_ticket` provenance column, so auditors can trace which changes came
-through shared credentials. See `CLAUDE.md` Group 1b for the full
-description; none of these tools are registered today.
+The ticket stays attached to your session (one per caller identity) for
+the rest of its lifetime; other callers' sessions never see it. Every AVU
+write made on that session is recorded into DuckLake with a `via_ticket`
+provenance column, so auditors can trace which changes came through
+shared credentials.
 
 ## Planned: AVU time-travel
 

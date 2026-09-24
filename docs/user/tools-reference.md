@@ -449,7 +449,7 @@ Source: search the codebase for `register_tool("ds_upload_file"`.
 
 ### `ds_use_ticket`
 
-Bind an iRODS ticket to the current MCP call. Subsequent AVU writes made in the same call record the ticket id in DuckLake's via_ticket column. Does not modify the caller's primary session.
+Supply an iRODS ticket to the caller's iRODS session. Subsequent operations by the same caller run with the ticket applied, and their AVU writes record the ticket id in DuckLake's via_ticket column. Other callers' sessions are unaffected.
 
 Input fields:
 

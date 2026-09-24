@@ -1,17 +1,17 @@
-"""``ds_use_ticket`` — bind a ticket id to the current MCP call.
+"""``ds_use_ticket`` — attach a ticket to the caller's pooled iRODS session.
 
-This tool does **not** mutate the user's primary session. Instead it
-records the ticket id on the ``current_ticket`` :class:`contextvars.ContextVar`
-so any subsequent AVU writes (or other writes) made in the same MCP
-call carry the ticket id through into DuckLake's ``via_ticket`` column
-(see ``mesa-ducklake/CLAUDE.md``).
+``Ticket.supply`` sets the ticket on the session it was constructed
+against, and python-irodsclient applies it to every connection that
+session hands out afterwards. We supply it to the caller's own pooled
+session: the pool keeps one session per caller identity
+(:meth:`AuthValue.cache_key`), so the ticket applies to that identity's
+later calls and never to anyone else's.
 
-The tool also opens a ticket-mediated session as a sanity check —
-``python-irodsclient``'s ``session.tickets`` / ``supply`` mechanism
-attaches a ticket to subsequent operations on that session, and we
-exercise it once to confirm the ticket is valid. We do not return the
-ticket-mediated session: tool handlers go back through ``default_pool``
-for their main session, and only the contextvar carries provenance.
+The ticket id is also recorded on that same session
+(:func:`mesa_mcp.context.bind_session_ticket`) so later AVU writes by the
+same identity carry it into DuckLake's ``via_ticket`` column (see
+``mesa-ducklake/CLAUDE.md``). A contextvar alone cannot do this — each MCP
+call runs in its own context, so a ``set`` here is gone by the next call.
 """
 
 from __future__ import annotations
@@ -22,7 +22,11 @@ from irods.ticket import Ticket
 from pydantic import BaseModel, Field
 
 from mesa_mcp.auth.models import AuthValue
-from mesa_mcp.context import current_ticket, require_current_auth_value
+from mesa_mcp.context import (
+    bind_session_ticket,
+    current_ticket,
+    require_current_auth_value,
+)
 from mesa_mcp.errors import ToolError
 from mesa_mcp.irods import ticket_errors
 from mesa_mcp.irods.client_pool import default_pool
@@ -42,9 +46,10 @@ class UseTicketInput(BaseModel):
 @register_tool(
     "ds_use_ticket",
     (
-        "Bind an iRODS ticket to the current MCP call. Subsequent AVU writes "
-        "made in the same call record the ticket id in DuckLake's via_ticket "
-        "column. Does not modify the caller's primary session."
+        "Supply an iRODS ticket to the caller's iRODS session. Subsequent "
+        "operations by the same caller run with the ticket applied, and their "
+        "AVU writes record the ticket id in DuckLake's via_ticket column. "
+        "Other callers' sessions are unaffected."
     ),
     input_model=UseTicketInput,
 )
@@ -62,11 +67,11 @@ async def handle_use_ticket(
             details={"tool": "ds_use_ticket"},
         )
 
-    # Open a ticket-mediated session as a validity probe. ``Ticket.supply``
-    # binds the ticket to the session it was constructed against, so we
-    # don't use the caller's primary session here — we hand the ticket to
-    # a fresh session that the pool would otherwise serve. Anything that
-    # fails surfaces as a ToolError to the caller.
+    # ``Ticket.supply`` attaches the ticket to *this* session — the caller's
+    # own pooled session, keyed by identity, so it cannot reach another
+    # caller. PRC applies it lazily when the session next opens a
+    # connection, so a bad ticket surfaces on the next operation rather
+    # than here; errors raised now still map to a ToolError.
     sess = session or default_pool().get(auth)
     try:
         Ticket(sess, ticket=args.ticket).supply()
@@ -83,12 +88,15 @@ async def handle_use_ticket(
             details={},
         ) from exc
 
+    # The session binding is what persists to later calls; the contextvar
+    # only covers anything else run in this same call.
+    bind_session_ticket(sess, args.ticket)
     current_ticket.set(args.ticket)
     return {
         "ticket": args.ticket,
         "bound": True,
         "note": (
-            "Ticket is now bound to the current MCP call context. "
-            "AVU writes in this call will record via_ticket in DuckLake."
+            "Ticket is now supplied to your iRODS session. Your subsequent "
+            "operations use it, and your AVU writes record via_ticket in DuckLake."
         ),
     }

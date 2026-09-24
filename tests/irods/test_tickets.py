@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mesa_mcp.auth.models import AuthValue
-from mesa_mcp.context import current_ticket
+from mesa_mcp.context import current_ticket, get_session_ticket
 from mesa_mcp.errors import ToolError
 from mesa_mcp.irods import tickets as ticket_helpers
 from mesa_mcp.irods.tools.create_ticket import (
@@ -264,11 +264,13 @@ async def test_ds_use_ticket_sets_contextvar(auth_alice, fake_session):
                 auth_value=auth_alice,
                 session=fake_session,
             )
-        # ``supply`` was invoked once as a validity probe.
+        # ``supply`` was invoked once, against the caller's pooled session.
         fake_ticket.supply.assert_called_once()
         assert result["ticket"] == "TUseTest"
         assert result["bound"] is True
         assert current_ticket.get() == "TUseTest"
+        # The session binding is what carries the ticket to later calls.
+        assert get_session_ticket(fake_session) == "TUseTest"
     finally:
         current_ticket.reset(token)
 

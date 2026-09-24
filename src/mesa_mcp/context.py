@@ -19,7 +19,7 @@ contextvar.
 from __future__ import annotations
 
 from contextvars import ContextVar
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mesa_mcp.auth.models import AuthValue
 
@@ -35,11 +35,11 @@ current_auth_value: ContextVar[AuthValue | None] = ContextVar(
 )
 
 # The currently-active iRODS ticket id, if the call is going through one.
-# ``ds_use_ticket`` sets this for the duration of subsequent handler
-# invocations in the same MCP call. AVU-write tools read it and emit it as
-# the ``via_ticket`` field of the ``AvuChange`` record they hand to
-# DuckLake. Defaults to ``None`` because most calls are not
-# ticket-mediated.
+# Only visible to code running in the same context as the ``set`` — every
+# MCP call runs in its own context, so this alone does NOT carry a ticket
+# from ``ds_use_ticket`` to a later ``ds_add_avu``. The durable binding is
+# the per-identity pooled session (see :func:`bind_session_ticket`).
+# Defaults to ``None`` because most calls are not ticket-mediated.
 current_ticket: ContextVar[str | None] = ContextVar(
     "mesa_mcp_current_ticket",
     default=None,
@@ -87,6 +87,42 @@ def require_current_auth_value() -> AuthValue:
 def get_current_ticket() -> str | None:
     """Return the currently-active iRODS ticket id, or ``None``."""
     return current_ticket.get()
+
+
+# Key under ``session.attributes`` holding the ticket supplied to that
+# session. Same name the mesa-ducklake design notes use for ``via_ticket``.
+SESSION_TICKET_ATTR = "mesa.via_ticket"
+
+
+def bind_session_ticket(session: Any, ticket: str) -> None:
+    """Record ``ticket`` as the active ticket on a pooled ``iRODSSession``.
+
+    The pool holds one session per caller identity
+    (:meth:`AuthValue.cache_key`), and ``Ticket.supply`` already attaches
+    the ticket to that session for every later operation. Recording the id
+    beside it keeps DuckLake provenance and the session's actual ticket
+    state on the same object: both live exactly as long as the session,
+    and neither can reach another identity's session. PRC sessions have no
+    ``attributes`` dict, so one is created on first use.
+    """
+    attributes = getattr(session, "attributes", None)
+    if not isinstance(attributes, dict):
+        attributes = {}
+        session.attributes = attributes
+    attributes[SESSION_TICKET_ATTR] = ticket
+
+
+def get_session_ticket(session: Any) -> str | None:
+    """Return the ticket bound to ``session`` by :func:`bind_session_ticket`.
+
+    Only a real ``dict`` holding a ``str`` counts, so duck-typed sessions
+    (e.g. ``MagicMock``) never yield a spurious ticket.
+    """
+    attributes = getattr(session, "attributes", None)
+    if not isinstance(attributes, dict):
+        return None
+    ticket = attributes.get(SESSION_TICKET_ATTR)
+    return ticket if isinstance(ticket, str) and ticket else None
 
 
 def require_current_client_pool() -> IRODSClientPool:
