@@ -279,3 +279,46 @@ async def test_init_project_errors_when_catalog_register_fails(
             auth_value=alice,
         )
     assert exc_info.value.code == "init_project_failed_catalog_register"
+
+
+async def test_init_project_honours_configured_data_collection(
+    alice: AuthValue, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The created sub-collection must be the one mesa-ducklake writes into."""
+    from mesa_mcp.config import Config, DuckLakeConfig, set_active_config
+    from mesa_mcp.ducklake.tools.init_project import InitProjectInput
+
+    session = _fake_session()
+    _patch_access_and_pool(monkeypatch, session)
+    fake_client = MagicMock(name="DuckLakeClient")
+    fake_client.find_project_by_path.return_value = None
+    fake_client.register_project.return_value = _fake_project()
+    dl_client.set_default_client(fake_client)
+
+    set_active_config(Config(ducklake=DuckLakeConfig(data_collection="/_history/lake/")))
+    try:
+        await handle_mesa_ducklake_init_project(
+            InitProjectInput(irods_path="/iplant/home/alice/proj/"),
+            auth_value=alice,
+        )
+    finally:
+        set_active_config(None)
+
+    session.collections.create.assert_called_once_with(
+        "/iplant/home/alice/proj/_history/lake", recurse=True
+    )
+
+
+@pytest.mark.parametrize(
+    ("data_collection", "expected"),
+    [
+        (".mesa/ducklake", "/p/.mesa/ducklake"),
+        ("/_history/", "/p/_history"),
+        ("", "/p/.mesa/ducklake"),
+        ("/", "/p/.mesa/ducklake"),
+    ],
+)
+def test_ducklake_subpath_normalizes_like_mesa_ducklake(
+    data_collection: str, expected: str
+) -> None:
+    assert dl_client.ducklake_subpath("/p/", data_collection) == expected

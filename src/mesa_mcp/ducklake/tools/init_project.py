@@ -3,7 +3,8 @@
 Idempotent bootstrap for AVU-history tracking on a project root.
 Performs the three steps the design calls out:
 
-1. Ensure ``<irods_path>/.mesa/ducklake/`` collection exists.
+1. Ensure the ``<irods_path>/<ducklake.data_collection>/`` collection
+   exists (default ``.mesa/ducklake``).
 2. Ensure ``mesa.enabled=true`` AVU is set on ``<irods_path>``.
 3. Find-or-register the project in the Postgres catalog.
 
@@ -27,7 +28,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mesa_mcp.auth.models import AuthValue
-from mesa_mcp.ducklake.client import get_default_client
+from mesa_mcp.ducklake.client import ducklake_subpath, get_default_client
 from mesa_mcp.errors import ToolError
 from mesa_mcp.irods.access import assert_allowed
 from mesa_mcp.irods.client_pool import default_pool
@@ -49,7 +50,8 @@ class InitProjectInput(BaseModel):
         description=(
             "Absolute iRODS path of the project's root collection — the "
             "collection that will carry the ``mesa.enabled=true`` AVU and "
-            "host the ``.mesa/ducklake/`` history sub-collection."
+            "host the DuckLake history sub-collection (``.mesa/ducklake/`` "
+            "unless ``ducklake.data_collection`` says otherwise)."
         ),
     )
 
@@ -57,7 +59,8 @@ class InitProjectInput(BaseModel):
 @register_tool(
     TOOL_NAME,
     "Enroll an iRODS collection as a MESA project. Creates the "
-    "<irods_path>/.mesa/ducklake/ sub-collection, sets the "
+    "<irods_path>/.mesa/ducklake/ sub-collection (or the configured "
+    "ducklake.data_collection), sets the "
     "mesa.enabled=true AVU on the project root, and registers the "
     "project in the DuckLake catalog. Idempotent — safe to re-run.",
     input_model=InitProjectInput,
@@ -87,13 +90,17 @@ async def handle_mesa_ducklake_init_project(
 
     norm = assert_allowed(args.irods_path, auth_value)
     session = default_pool().get(auth_value)
-    ducklake_path = f"{norm.rstrip('/')}/.mesa/ducklake"
+    # Must be the sub-collection mesa-ducklake writes into, which
+    # ducklake.client passes through from the same config field.
+    from mesa_mcp.config import get_active_config
+
+    ducklake_path = ducklake_subpath(norm, get_active_config().ducklake.data_collection)
 
     # Step 1 — project root must exist and be a collection. Per-step
     # ToolError codes so clients can pinpoint the failure.
     _ensure_project_root_is_collection(session, norm)
 
-    # Step 2 — create the .mesa/ducklake/ sub-collection (idempotent).
+    # Step 2 — create the DuckLake sub-collection (idempotent).
     _ensure_ducklake_collection(session, ducklake_path)
 
     # Step 3 — set mesa.enabled=true on the project root (idempotent).
@@ -144,7 +151,7 @@ def _ensure_project_root_is_collection(session: Any, irods_path: str) -> None:
 
 
 def _ensure_ducklake_collection(session: Any, ducklake_path: str) -> None:
-    """Create ``<root>/.mesa/ducklake/``. Tolerates "already exists"."""
+    """Create ``<root>/<data_collection>/``. Tolerates "already exists"."""
     try:
         session.collections.create(ducklake_path, recurse=True)
     except Exception as exc:  # noqa: BLE001 - PRC raises a mix of types

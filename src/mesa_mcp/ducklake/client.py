@@ -43,6 +43,22 @@ logger = structlog.get_logger(__name__)
 #: as a literal rather than imported so this module stays importable when
 #: the optional mesa-ducklake dependency is absent.
 DEFAULT_DATA_COLLECTION = ".mesa/ducklake"
+
+
+def ducklake_subpath(project_root: str, data_collection: str | None = None) -> str:
+    """Return ``<project_root>/<data_collection>``, normalized.
+
+    Mirrors ``mesa_ducklake.irods_path.ducklake_subpath`` (same slash
+    stripping, same fallback to :data:`DEFAULT_DATA_COLLECTION` for an
+    empty value) so the collection mesa-mcp creates is the one the
+    library writes Parquet into — without importing the optional
+    dependency, whose older releases lack the ``data_collection`` arg.
+    """
+    sub = (data_collection or DEFAULT_DATA_COLLECTION).strip("/")
+    if not sub:
+        sub = DEFAULT_DATA_COLLECTION
+    return f"{project_root.rstrip('/')}/{sub}"
+
 _stdlib_logger = logging.getLogger(__name__)
 
 
