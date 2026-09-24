@@ -82,6 +82,8 @@ the relevant pages flag them inline.
   `python-irodsclient` and the OLS API.
 - [Contributing](./dev/contributing.md) — PR conventions and the
   `.claude/agents/` roster.
+- [Design records](./design/README.md) — context, decisions, and
+  trade-offs behind larger features, plus historical implementation plans.
 
 ## For operators (Mode A — hosted service)
 

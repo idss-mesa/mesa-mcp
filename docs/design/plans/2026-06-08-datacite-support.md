@@ -1,6 +1,6 @@
 # DataCite Support Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status:** implemented; checkboxes below are historical and not maintained.
 
 **Goal:** Give mesa-mcp first-class DataCite descriptive-metadata support — a validated DataCite 4.x model, a record⇄AVU transform with a canonical (and CyVerse-legacy) naming, and MCP tools to scaffold, validate, apply (bulk-write + DuckLake mirror), and export DataCite records.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.11, Pydantic v2 (already a dep), stdlib `xml.etree.ElementTree`, pytest. Tests run with `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest` from the `mesa-mcp/` repo root.
 
-**Spec:** `docs/superpowers/specs/2026-06-08-datacite-support-design.md`
+**Spec:** `docs/design/2026-06-08-datacite-support-design.md`
 
 **Conventions for every command below:**
 - `PY=/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python`
