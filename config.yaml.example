@@ -31,8 +31,8 @@ irods:
 
 # --- OBO / EMBL-EBI Ontology Lookup Service -------------------------------
 ols:
-  # OLS4 API base URL.
-  base_url: https://www.ebi.ac.uk/ols4/api
+  # OLS4 API base URL. Keep the trailing /v2 — every endpoint appends to it.
+  base_url: https://www.ebi.ac.uk/ols4/api/v2
   # Cache TTLs (seconds). The ontology list rarely changes; per-term records
   # are stable enough for an hour; search results are short-lived.
   ontology_cache_ttl: 3600

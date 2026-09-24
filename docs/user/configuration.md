@@ -76,7 +76,7 @@ for the user/password fields.
 
 | Field                 | Default                                  | Description                                                |
 | --------------------- | ---------------------------------------- | ---------------------------------------------------------- |
-| `base_url`            | `https://www.ebi.ac.uk/ols4/api`         | OLS4 API base.                                             |
+| `base_url`            | `https://www.ebi.ac.uk/ols4/api/v2`      | OLS4 API base.                                             |
 | `ontology_cache_ttl`  | `3600` seconds                           | Cache TTL for the ontology catalog.                        |
 | `term_cache_ttl`      | `600` seconds                            | Cache TTL for per-term records.                            |
 | `search_cache_ttl`    | `60` seconds                             | Cache TTL for search results.                              |

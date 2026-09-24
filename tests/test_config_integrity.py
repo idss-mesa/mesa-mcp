@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import logging
 import textwrap
+from pathlib import Path
 
 import pytest
+import yaml
 
 from mesa_mcp.config import Config, OLSConfig, load_config, set_active_config
 from mesa_mcp.ols.client import OLSClient, get_ols_client
@@ -124,3 +126,17 @@ def test_ols_base_url_default_targets_the_v2_api():
     assert OLSConfig().base_url.endswith("/v2")
     set_active_config(Config())
     assert get_ols_client().base_url == OLSConfig().base_url
+
+
+def test_shipped_examples_use_the_default_ols_base_url():
+    """``config.yaml.example`` and ``.env.example`` are copied verbatim by
+    operators; a stale ``.../ols4/api`` there breaks every OLS call."""
+    root = Path(__file__).resolve().parents[1]
+    example = yaml.safe_load((root / "config.yaml.example").read_text())
+    assert example["ols"]["base_url"] == OLSConfig().base_url
+
+    env_lines = (root / ".env.example").read_text().splitlines()
+    env = dict(
+        line.split("=", 1) for line in env_lines if line.startswith("MESA_MCP_OLS__BASE_URL=")
+    )
+    assert env["MESA_MCP_OLS__BASE_URL"] == OLSConfig().base_url
