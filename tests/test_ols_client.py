@@ -15,6 +15,7 @@ import pytest
 import requests as req
 
 from mesa_mcp.ols.client import (
+    OLS_SEARCH_URL,
     OLSAPIError,
     OLSClient,
     _extract_ontologies,
@@ -280,6 +281,33 @@ class TestGetTerm:
         assert client.get_term("envo", "http://example.com/missing") is None
 
 
+    def test_get_term_falls_back_to_individuals(self, client: OLSClient, mocker) -> None:
+        """ROR organisations are OWL individuals: /classes/ 404s for them."""
+        iri = "https://ror.org/03m2x1q45"
+        individual = {
+            "label": ["University of Arizona"],
+            "iri": iri,
+            "curie": "ror:03m2x1q45",
+            "ontologyId": "ror",
+        }
+        get_spy = mocker.patch.object(
+            client.session,
+            "get",
+            side_effect=[
+                make_response(404, {"message": "Not found"}),
+                make_response(200, individual),
+            ],
+        )
+        result = client.get_term("ror", iri)
+
+        urls = [c.args[0] for c in get_spy.call_args_list]
+        assert "/ontologies/ror/classes/" in urls[0]
+        assert "/ontologies/ror/individuals/" in urls[1]
+        assert result is not None
+        assert result["label"] == "University of Arizona"
+        assert result["curie"] == "ror:03m2x1q45"
+
+
 # ---------------------------------------------------------------------------
 # get_term_children
 # ---------------------------------------------------------------------------
@@ -342,9 +370,9 @@ class TestSearchTermDescendants:
             "tropical", "envo", "http://purl.obolibrary.org/obo/ENVO_00000428"
         )
 
-        # Hits the v1-compat search URL, not the v2 path.
+        # Hits the v1-compat search URL beside the configured v2 base.
         called_url = get_spy.call_args.args[0]
-        assert called_url == "https://www.ebi.ac.uk/ols4/api/search"
+        assert called_url == "https://test.ols.example.com/api/search"
         params = get_spy.call_args.kwargs["params"]
         assert params["q"] == "tropical"
         assert params["ontology"] == "envo"
@@ -353,6 +381,30 @@ class TestSearchTermDescendants:
         assert len(results) == 1
         assert results[0]["label"] == "tropical biome"
         assert results[0]["curie"] == "ENVO:01"
+
+    def test_default_base_url_targets_ebi_search(self, mocker) -> None:
+        client = OLSClient()
+        get_spy = mocker.patch.object(
+            client.session, "get", return_value=make_response(200, {"response": {"docs": []}})
+        )
+        client.search_term_descendants("x", "envo", "http://example.com/p")
+        assert get_spy.call_args.args[0] == "https://www.ebi.ac.uk/ols4/api/search"
+        assert client.search_url == OLS_SEARCH_URL
+
+    @pytest.mark.parametrize(
+        "base_url",
+        [
+            "https://ols.example.org/ols4/api/v2",
+            "https://ols.example.org/ols4/api/v2/",
+        ],
+    )
+    def test_custom_base_url_is_honoured(self, base_url: str, mocker) -> None:
+        client = OLSClient(base_url=base_url)
+        get_spy = mocker.patch.object(
+            client.session, "get", return_value=make_response(200, {"response": {"docs": []}})
+        )
+        client.search_term_descendants("x", "envo", "http://example.com/p")
+        assert get_spy.call_args.args[0] == "https://ols.example.org/ols4/api/search"
 
 
 # ---------------------------------------------------------------------------

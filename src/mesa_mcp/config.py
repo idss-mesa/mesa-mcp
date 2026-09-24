@@ -66,13 +66,11 @@ class DuckLakeConfig(BaseModel):
     # Postgres DSN for the DuckLake catalog. Empty disables DuckLake mirroring;
     # AVU writes still succeed but are not recorded.
     catalog_dsn: str | None = None
-    # iRODS sub-collection (per project) that holds the Parquet data files.
-    #
-    # NOT IMPLEMENTED. Nothing in mesa-mcp or mesa-ducklake reads this, so
-    # setting it has no effect and the layout is whatever mesa-ducklake
-    # chooses. Retained because the field is part of the documented config
-    # surface and removing it would silently ignore an operator's YAML;
-    # wire it through mesa_ducklake before treating it as live.
+    # iRODS sub-collection (per project) that holds the Parquet data files,
+    # relative to the project root. ducklake.client passes a non-default
+    # value to DuckLakeClient(data_collection=...) (warning and ignoring it
+    # on a mesa-ducklake too old to accept it), and
+    # mesa_ducklake_init_project creates this sub-collection.
     data_collection: str = ".mesa/ducklake"
     # Local Parquet cache directory. mesa-ducklake materializes each
     # snapshot's Parquet here before pushing to iRODS; reads pull

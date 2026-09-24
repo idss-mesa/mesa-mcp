@@ -43,6 +43,22 @@ logger = structlog.get_logger(__name__)
 #: as a literal rather than imported so this module stays importable when
 #: the optional mesa-ducklake dependency is absent.
 DEFAULT_DATA_COLLECTION = ".mesa/ducklake"
+
+
+def ducklake_subpath(project_root: str, data_collection: str | None = None) -> str:
+    """Return ``<project_root>/<data_collection>``, normalized.
+
+    Mirrors ``mesa_ducklake.irods_path.ducklake_subpath`` (same slash
+    stripping, same fallback to :data:`DEFAULT_DATA_COLLECTION` for an
+    empty value) so the collection mesa-mcp creates is the one the
+    library writes Parquet into — without importing the optional
+    dependency, whose older releases lack the ``data_collection`` arg.
+    """
+    sub = (data_collection or DEFAULT_DATA_COLLECTION).strip("/")
+    if not sub:
+        sub = DEFAULT_DATA_COLLECTION
+    return f"{project_root.rstrip('/')}/{sub}"
+
 _stdlib_logger = logging.getLogger(__name__)
 
 
@@ -302,20 +318,14 @@ def _resolve_mirror_target(
             cause=exc,
         ) from exc
 
-    # Ticket provenance: prefer the contextvar set by ``ds_use_ticket`` (the
-    # canonical signal in mesa-mcp); fall back to the legacy session-attribute
-    # form that the design notes mention so we stay compatible with the
-    # rule-engine callback path that sets it that way.
-    from mesa_mcp.context import get_current_ticket
+    # Ticket provenance. ``ds_use_ticket`` binds the ticket to the caller's
+    # pooled session (``session.attributes["mesa.via_ticket"]``), which is
+    # what carries it across MCP calls; the contextvar only covers code that
+    # ran in the same context as the bind, so it is checked first but is
+    # rarely the source.
+    from mesa_mcp.context import get_current_ticket, get_session_ticket
 
-    via_ticket: str | None = get_current_ticket()
-    if via_ticket is None:
-        attributes = getattr(session, "attributes", None)
-        if attributes is not None:
-            try:
-                via_ticket = attributes.get("mesa.via_ticket")
-            except Exception:  # noqa: BLE001
-                via_ticket = None
+    via_ticket: str | None = get_current_ticket() or get_session_ticket(session)
 
     return (client, project, via_ticket)
 
@@ -342,8 +352,9 @@ async def record_avu_change(
       ``mesa.enabled=true`` AVU on a parent collection).
 
     Populates ``actor`` from ``auth_value.username``, ``source`` as
-    ``f"mesa-mcp:{tool_name}"``, and ``via_ticket`` from
-    ``session.attributes.get('mesa.via_ticket')`` when set.
+    ``f"mesa-mcp:{tool_name}"``, and ``via_ticket`` from the ticket
+    ``ds_use_ticket`` bound to ``session`` (``session.attributes
+    ['mesa.via_ticket']``) when set.
 
     Raises :class:`DuckLakeMirrorError` when DuckLake is enabled and the
     project *is* MESA-enabled but the catalog write itself fails. Callers

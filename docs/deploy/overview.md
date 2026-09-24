@@ -90,7 +90,7 @@ The topology, component table, and run-mode notes below describe
 | ----------------------------------- | -------------------------------------------------------------------- | ------------------------------- |
 | `mesa-mcp` (systemd service)        | The Python MCP server. Stdio transport today, SSE planned.           | Shipping (stdio only)           |
 | `python-irodsclient` (in process)   | Native iRODS protocol to `data.cyverse.org:1247`.                    | Library installed; tools land   |
-| OLS HTTP client (in process)        | `https://www.ebi.ac.uk/ols4/api`, cached via `cachetools.TTLCache`.  | Shipping                        |
+| OLS HTTP client (in process)        | `https://www.ebi.ac.uk/ols4/api/v2`, cached via `cachetools.TTLCache`. | Shipping                        |
 | Postgres `mesa_ducklake` database   | DuckLake catalog (for the sibling `mesa-ducklake` project).          | Planned                         |
 | nginx + Let's Encrypt               | Reverse proxy fronting the SSE port, terminating TLS.                | Planned (only needed for SSE)   |
 | CyVerse Keycloak                    | OIDC IdP for the SSE transport.                                      | Planned                         |
