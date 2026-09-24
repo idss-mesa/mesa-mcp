@@ -15,6 +15,7 @@ import pytest
 import requests as req
 
 from mesa_mcp.ols.client import (
+    OLS_SEARCH_URL,
     OLSAPIError,
     OLSClient,
     _extract_ontologies,
@@ -342,9 +343,9 @@ class TestSearchTermDescendants:
             "tropical", "envo", "http://purl.obolibrary.org/obo/ENVO_00000428"
         )
 
-        # Hits the v1-compat search URL, not the v2 path.
+        # Hits the v1-compat search URL beside the configured v2 base.
         called_url = get_spy.call_args.args[0]
-        assert called_url == "https://www.ebi.ac.uk/ols4/api/search"
+        assert called_url == "https://test.ols.example.com/api/search"
         params = get_spy.call_args.kwargs["params"]
         assert params["q"] == "tropical"
         assert params["ontology"] == "envo"
@@ -353,6 +354,30 @@ class TestSearchTermDescendants:
         assert len(results) == 1
         assert results[0]["label"] == "tropical biome"
         assert results[0]["curie"] == "ENVO:01"
+
+    def test_default_base_url_targets_ebi_search(self, mocker) -> None:
+        client = OLSClient()
+        get_spy = mocker.patch.object(
+            client.session, "get", return_value=make_response(200, {"response": {"docs": []}})
+        )
+        client.search_term_descendants("x", "envo", "http://example.com/p")
+        assert get_spy.call_args.args[0] == "https://www.ebi.ac.uk/ols4/api/search"
+        assert client.search_url == OLS_SEARCH_URL
+
+    @pytest.mark.parametrize(
+        "base_url",
+        [
+            "https://ols.example.org/ols4/api/v2",
+            "https://ols.example.org/ols4/api/v2/",
+        ],
+    )
+    def test_custom_base_url_is_honoured(self, base_url: str, mocker) -> None:
+        client = OLSClient(base_url=base_url)
+        get_spy = mocker.patch.object(
+            client.session, "get", return_value=make_response(200, {"response": {"docs": []}})
+        )
+        client.search_term_descendants("x", "envo", "http://example.com/p")
+        assert get_spy.call_args.args[0] == "https://ols.example.org/ols4/api/search"
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ from urllib3.util.retry import Retry
 logger = logging.getLogger(__name__)
 
 OLS_BASE_URL = "https://www.ebi.ac.uk/ols4/api/v2"
+# What ``_search_url_for(OLS_BASE_URL)`` yields; kept as a named default.
 OLS_SEARCH_URL = "https://www.ebi.ac.uk/ols4/api/search"
 
 # Cache TTLs (seconds) — preserved from the esiil-portal source.
@@ -43,6 +44,20 @@ _CACHE_MAXSIZE = 4096
 
 # HTTP timeout when the caller supplies none. Also ported from the portal.
 _DEFAULT_TIMEOUT = 15
+
+
+def _search_url_for(base_url: str) -> str:
+    """Derive the v1-compat ``/search`` URL from the configured v2 base.
+
+    ``allChildrenOf`` is only served by the v1 search endpoint, which sits
+    beside ``/v2`` rather than under it. Deriving it (instead of hardcoding
+    EBI) keeps a mirror or self-hosted OLS configured via ``base_url``
+    from silently sending descendant searches to EBI.
+    """
+    root = base_url.rstrip("/")
+    if root.endswith("/v2"):
+        root = root[: -len("/v2")]
+    return f"{root.rstrip('/')}/search"
 
 
 class OLSAPIError(Exception):
@@ -79,6 +94,7 @@ class OLSClient:
         3600. Omitted arguments keep the ported defaults.
         """
         self.base_url = (base_url or OLS_BASE_URL).rstrip("/")
+        self.search_url = _search_url_for(self.base_url)
         self.timeout = _DEFAULT_TIMEOUT if request_timeout is None else request_timeout
 
         ontology_ttl = _TTL_24H if ontology_cache_ttl is None else ontology_cache_ttl
@@ -354,7 +370,7 @@ class OLSClient:
             "rows": size,
             "fieldList": "iri,label,obo_id,description,ontology_name,hasChildren",
         }
-        resp = self.session.get(OLS_SEARCH_URL, params=params, timeout=self.timeout)
+        resp = self.session.get(self.search_url, params=params, timeout=self.timeout)
         resp.raise_for_status()
         data = resp.json()
 
