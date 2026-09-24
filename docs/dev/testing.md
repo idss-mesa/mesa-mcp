@@ -29,7 +29,13 @@ tests/
 ├── test_irods_pool.py       # IRODSClientPool LRU
 ├── test_ols_client.py       # OLSClient with requests-mock-style stubs
 ├── test_ols_tools.py        # mesa_ols_* tool dispatch
-└── test_ols_transform.py    # AVU round-trip
+├── test_ols_transform.py    # AVU round-trip
+├── test_llm_token_ledger.py # budget arithmetic for the live tier (hermetic)
+└── live/                    # real OLS + local LLMs; skipped unless MESA_LIVE=1
+    ├── _llm.py              # TokenLedger, LLMClient, ToolAgent
+    ├── conftest.py          # gating + fixtures
+    ├── test_ols_live.py     # OBO Foundry / OLS pings through the tools
+    └── test_ols_llm_agent.py# vLLM models driving the tools
 ```
 
 Tool-specific tests should follow the pattern
@@ -151,6 +157,98 @@ def test_round_trip():
 
 The `mcp-reviewer` agent checks for this kind of test on OLS-touching
 diffs. See [Contributing](./contributing.md).
+
+## Live OLS + local-LLM tests
+
+Everything above is hermetic. `tests/live/` is the opposite on purpose:
+it pings the real OBO Foundry / EMBL-EBI OLS APIs through the registered
+`mesa_ols_*` tools, and optionally lets the **local vLLM models on
+sparky-2** drive those tools the way an MCP client would. Nothing in
+this tier runs unless you ask for it, so `pytest -q` stays green
+offline — the tests show up as *skipped* with the reason in the `-ra`
+summary.
+
+### Two switches
+
+| Env var | Enables | Default |
+|---|---|---|
+| `MESA_LIVE=1` | tests marked `live` (real OLS traffic, no LLM) | off |
+| `MESA_LLM_API_KEY=…` | tests marked `llm` (needs `MESA_LIVE=1` too) | unset |
+
+Both are also read from a repo-root `.env` (gitignored); see the
+"Live test tier" block in `.env.example` for every knob.
+
+### Reaching the models
+
+The chat models (`ab-moe`, `carc-fast`, `carc-tools`) and the embedder
+(`carc-embed`) are served by vLLM on sparky-2 behind a LiteLLM gateway
+that binds a docker-bridge address there. From sparky-1 (or a laptop on
+the cluster VPN) open one SSH tunnel to the gateway:
+
+```bash
+scripts/llm_tunnel.sh up        # 127.0.0.1:18000 -> sparky-2 gateway
+export MESA_LIVE=1
+export MESA_LLM_API_KEY=...     # LiteLLM master or virtual key
+pytest tests/live -q
+scripts/llm_tunnel.sh down
+```
+
+The script never reads credentials. The key lives in the gateway config
+on sparky-2 (`general_settings.master_key` in
+`/opt/carc/carc-agents/gateway/litellm.config.yaml`, root-readable) or
+can be minted as a virtual key from that master key.
+
+### How tokens are managed
+
+Every model call goes through `tests.live._llm.TokenLedger`, which is
+session-scoped and charges each request to the test that made it:
+
+- **Budgets are enforced before the request.** `max_tokens` is clamped
+  to the smaller of the per-call cap, what is left in the test's budget
+  and what is left in the session's budget. A test with nothing left
+  raises `TokenBudgetExceeded` instead of calling out.
+- **Prompt tokens count too.** Budgets are prompt + completion, because
+  on a shared GPU box a 131k-context model fed big tool outputs is the
+  real cost. `ToolAgent` truncates each tool result to
+  `MESA_LLM_TOOL_RESULT_MAX_CHARS` before it re-enters the prompt and
+  stops after `MESA_LLM_MAX_TOOL_ROUNDS`.
+- **Thinking is off where the model allows it.** `carc-fast` honours
+  `enable_thinking: false`; `ab-moe` does not, so its reasoning tokens
+  are what the per-test budget mostly absorbs.
+- **You get a bill.** At the end of the run pytest prints a per-test and
+  per-model usage table; set `MESA_LLM_TOKEN_REPORT=path.json` to also
+  write it as JSON.
+
+Defaults: 12k tokens per test, 150k per session, 1024 per completion.
+Override with `MESA_LLM_TEST_TOKEN_BUDGET`, `MESA_LLM_SESSION_TOKEN_BUDGET`
+and `MESA_LLM_MAX_COMPLETION_TOKENS`.
+
+### Writing an LLM-driven test
+
+```python
+pytestmark = [pytest.mark.live, pytest.mark.llm]
+
+async def test_agent_finds_biome(agent):
+    run = await agent.run(
+        "Using ENVO, find the term labelled 'biome'; reply with its CURIE.",
+        tools=["mesa_ols_search_terms", "mesa_ols_get_term"],
+    )
+    assert run.calls_to("mesa_ols_search_terms")      # it really used the tool
+    assert "ENVO:00000428" in run.final_text
+```
+
+`agent` wires the registered tools into the model as OpenAI functions
+and executes every call through `MesaServer.call` — the same dispatch
+path the MCP transport uses — so the model is hitting live OLS through
+the real input validation. `run.calls` is the full trace, which is what
+lets a test assert that a reported IRI is one a tool actually returned
+(see `test_agent_grounds_iri_in_tool_output`). Use the `llm` fixture
+directly for no-tool calls (`llm.chat(...)`, `llm.embed(...)`); pick the
+model per call with `model=live_settings.fast_model`.
+
+The budget arithmetic itself is covered hermetically in
+`tests/test_llm_token_ledger.py`, so a refactor of `_llm.py` cannot turn
+the clamp off unnoticed.
 
 ## Linting
 

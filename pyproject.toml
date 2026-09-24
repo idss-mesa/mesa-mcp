@@ -76,6 +76,12 @@ ignore = []
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-ra"
+# The live tier (tests/live/) is skipped unless MESA_LIVE=1; the llm subset
+# additionally needs MESA_LLM_API_KEY. See docs/dev/testing.md.
+markers = [
+    "live: hits the real OBO Foundry / EMBL-EBI OLS APIs (needs MESA_LIVE=1)",
+    "llm: drives the tools with the local vLLM models on sparky-2 (needs MESA_LLM_API_KEY)",
+]
 
 [tool.mypy]
 python_version = "3.11"
