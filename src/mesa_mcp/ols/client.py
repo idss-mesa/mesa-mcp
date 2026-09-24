@@ -292,9 +292,16 @@ class OLSClient:
             encoded_iri = requests.utils.quote(
                 requests.utils.quote(iri, safe=""), safe=""
             )
-            data = self._make_request(
-                f"/ontologies/{ontology_id.lower()}/classes/{encoded_iri}"
-            )
+            base = f"/ontologies/{ontology_id.lower()}"
+            try:
+                data = self._make_request(f"{base}/classes/{encoded_iri}")
+            except OLSAPIError as e:
+                if e.status_code != 404:
+                    raise
+                # Some vocabularies model their terms as OWL individuals,
+                # not classes — ROR's organisations are the case in point —
+                # and OLS serves those only under /individuals/.
+                data = self._make_request(f"{base}/individuals/{encoded_iri}")
             result = _extract_term(data)
             self._cache_term[cache_key] = result
             return result

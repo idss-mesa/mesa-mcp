@@ -281,6 +281,33 @@ class TestGetTerm:
         assert client.get_term("envo", "http://example.com/missing") is None
 
 
+    def test_get_term_falls_back_to_individuals(self, client: OLSClient, mocker) -> None:
+        """ROR organisations are OWL individuals: /classes/ 404s for them."""
+        iri = "https://ror.org/03m2x1q45"
+        individual = {
+            "label": ["University of Arizona"],
+            "iri": iri,
+            "curie": "ror:03m2x1q45",
+            "ontologyId": "ror",
+        }
+        get_spy = mocker.patch.object(
+            client.session,
+            "get",
+            side_effect=[
+                make_response(404, {"message": "Not found"}),
+                make_response(200, individual),
+            ],
+        )
+        result = client.get_term("ror", iri)
+
+        urls = [c.args[0] for c in get_spy.call_args_list]
+        assert "/ontologies/ror/classes/" in urls[0]
+        assert "/ontologies/ror/individuals/" in urls[1]
+        assert result is not None
+        assert result["label"] == "University of Arizona"
+        assert result["curie"] == "ror:03m2x1q45"
+
+
 # ---------------------------------------------------------------------------
 # get_term_children
 # ---------------------------------------------------------------------------
