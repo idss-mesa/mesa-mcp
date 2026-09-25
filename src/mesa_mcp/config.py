@@ -91,6 +91,10 @@ class ServerConfig(BaseModel):
     transport: Transport = "stdio"
     bind_address: str = "127.0.0.1"
     bind_port: int = 8080
+    # ``mesa_mcp.tools`` entry points (third-party tool packages) are imported when the
+    # server starts. A plugin that fails to import is skipped with a warning; strict turns
+    # that into a startup error (``MESA_MCP_SERVER__STRICT_PLUGINS=1``).
+    strict_plugins: bool = False
 
     # Canonical public base URL of this MCP server (no trailing slash) —
     # e.g. ``https://mesa-mcp.cis240692.projects.jetstream-cloud.org``.
@@ -189,11 +193,7 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
     """Return a new dict where ``overlay`` keys (recursively) win over ``base``."""
     merged: dict[str, Any] = dict(base)
     for key, value in overlay.items():
-        if (
-            key in merged
-            and isinstance(merged[key], dict)
-            and isinstance(value, dict)
-        ):
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
             merged[key] = _deep_merge(merged[key], value)
         else:
             merged[key] = value
@@ -281,9 +281,7 @@ def load_config(
     return Config.model_validate(merged)
 
 
-def _warn_unknown_keys(
-    yaml_layer: dict[str, Any], *, source: str = "config file"
-) -> None:
+def _warn_unknown_keys(yaml_layer: dict[str, Any], *, source: str = "config file") -> None:
     """Log a warning for keys no model field will consume.
 
     Pydantic's default is to ignore unknown keys, so a typo
@@ -305,9 +303,7 @@ def _warn_unknown_keys(
         model = section_models.get(section)
         if model is None:
             if section not in Config.model_fields:
-                logger.warning(
-                    "config: unknown section %r in %s ignored", section, source
-                )
+                logger.warning("config: unknown section %r in %s ignored", section, source)
             continue
         if not isinstance(values, dict):
             continue
