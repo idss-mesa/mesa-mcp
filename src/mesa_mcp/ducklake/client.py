@@ -341,8 +341,12 @@ async def record_avu_change(
     op: Literal["add", "delete"],
     tool_name: str,
     session: iRODSSession | None = None,
-) -> None:
+) -> Any | None:
     """Mirror an AVU change into the project's DuckLake, if any.
+
+    Returns the committed ``mesa_ducklake.Snapshot`` when a change was recorded, or ``None``
+    when mirroring short-circuited (see below). Callers that ignore the value are unaffected;
+    callers that keep decision provenance (mesa-anyjev) use ``snapshot_id`` as their join key.
 
     Short-circuits silently when:
 
@@ -367,7 +371,7 @@ async def record_avu_change(
         session=session,
     )
     if resolved is None:
-        return
+        return None
 
     client, project, via_ticket = resolved
 
@@ -389,7 +393,7 @@ async def record_avu_change(
     )
 
     try:
-        client.record_changes(
+        snapshot = client.record_changes(
             project_id=project.project_id,
             actor=auth_value.username,
             changes=[change],
@@ -411,6 +415,8 @@ async def record_avu_change(
             project_id=project.project_id,
             cause=exc,
         ) from exc
+    return snapshot
+
 
 
 async def record_avu_changes(
@@ -421,8 +427,11 @@ async def record_avu_changes(
     changes: list[tuple[str, str, str, Literal["add", "delete"]]],
     tool_name: str,
     session: iRODSSession | None = None,
-) -> None:
+) -> Any | None:
     """Mirror MANY AVU changes for ONE iRODS path as a SINGLE DuckLake snapshot.
+
+    Returns the committed ``mesa_ducklake.Snapshot``, or ``None`` when mirroring
+    short-circuited or ``changes`` is empty.
 
     This is the bulk counterpart of :func:`record_avu_change`. It writes all
     ``changes`` as one ``record_changes`` call (one Parquet file / snapshot)
@@ -448,7 +457,7 @@ async def record_avu_changes(
     project *is* MESA-enabled but the catalog write fails.
     """
     if not changes:
-        return
+        return None
 
     resolved = _resolve_mirror_target(
         auth_value=auth_value,
@@ -457,7 +466,7 @@ async def record_avu_changes(
         session=session,
     )
     if resolved is None:
-        return
+        return None
 
     client, project, via_ticket = resolved
 
@@ -479,7 +488,7 @@ async def record_avu_changes(
     ]
 
     try:
-        client.record_changes(
+        snapshot = client.record_changes(
             project_id=project.project_id,
             actor=auth_value.username,
             changes=avu_changes,
@@ -500,6 +509,8 @@ async def record_avu_changes(
             project_id=project.project_id,
             cause=exc,
         ) from exc
+    return snapshot
+
 
 
 # ---------------------------------------------------------------------------

@@ -59,8 +59,8 @@ async def test_no_client_is_silent_noop(alice: AuthValue) -> None:
     """When DuckLake singleton is None, record_avu_change just returns."""
     session = MagicMock(name="iRODSSession")
     dl_client.set_default_client(None)
-    # No exception, no calls.
-    await dl_client.record_avu_change(
+    # No exception, no calls, and None (no snapshot was recorded).
+    result = await dl_client.record_avu_change(
         auth_value=alice,
         irods_path="/iplant/home/alice/file.csv",
         target_type="data_object",
@@ -71,6 +71,7 @@ async def test_no_client_is_silent_noop(alice: AuthValue) -> None:
         tool_name="ds_add_avu",
         session=session,
     )
+    assert result is None
     session.metadata.get.assert_not_called()
 
 
@@ -141,7 +142,7 @@ async def test_records_change_when_inside_mesa_project(
     fake_module.AvuChange = _AvuChange  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "mesa_ducklake.models", fake_module)
 
-    await dl_client.record_avu_change(
+    snapshot = await dl_client.record_avu_change(
         auth_value=alice,
         irods_path=f"{project_root}/data/file.csv",
         target_type="data_object",
@@ -153,6 +154,8 @@ async def test_records_change_when_inside_mesa_project(
         session=session,
     )
 
+    # The committed Snapshot comes back so a caller can key provenance on snapshot_id.
+    assert snapshot is fake.record_changes.return_value
     fake.find_project_by_path.assert_called_once_with(project_root)
     fake.record_changes.assert_called_once()
     call_kwargs = fake.record_changes.call_args.kwargs
