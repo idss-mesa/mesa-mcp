@@ -161,8 +161,13 @@ def register_tool(
     *,
     input_model: type[BaseModel] | None = None,
     output_model: type[BaseModel] | None = None,
+    meta: dict[str, Any] | None = None,
 ) -> Callable[[ToolHandler], ToolHandler]:
     """Decorator that adds a tool to the global mesa-mcp tool registry.
+
+    ``meta`` seeds the tool's ``_meta`` block. A plugin (see :func:`load_plugins`) declares
+    its own surface family with ``meta={"io.mesa/surface": "decision"}``; tools without it
+    are classified by name prefix in :func:`_tool_surface`.
 
     Example
     -------
@@ -180,10 +185,58 @@ def register_tool(
             handler=handler,
             input_model=input_model,
             output_model=output_model,
+            meta=dict(meta or {}),
         )
         return handler
 
     return decorator
+
+
+PLUGIN_ENTRY_POINT_GROUP = "mesa_mcp.tools"
+_LOADED_PLUGINS: dict[str, str] = {}
+
+
+def load_plugins(*, strict: bool = False) -> dict[str, str]:
+    """Import every ``mesa_mcp.tools`` entry point so its ``@register_tool`` decorators fire.
+
+    Third-party packages (mesa-anyjev's ``mesa_decide_*`` tools, for example) declare::
+
+        [project.entry-points."mesa_mcp.tools"]
+        decide = "mesa_anyjev.mcp_tools"
+
+    Each entry point is loaded once per process. A plugin that fails to import is skipped
+    with a warning so a broken optional package cannot take the whole server down, unless
+    ``strict`` (``MESA_MCP_SERVER__STRICT_PLUGINS=1``) turns that into a hard error.
+    Returns ``{entry point name: "loaded" | "failed: <reason>"}``.
+    """
+    from importlib.metadata import entry_points
+
+    import structlog
+
+    logger = structlog.get_logger(__name__)
+    for ep in entry_points(group=PLUGIN_ENTRY_POINT_GROUP):
+        if ep.name in _LOADED_PLUGINS and _LOADED_PLUGINS[ep.name] == "loaded":
+            continue
+        try:
+            ep.load()
+        except Exception as exc:  # noqa: BLE001 - a plugin must not break the host
+            _LOADED_PLUGINS[ep.name] = f"failed: {type(exc).__name__}: {exc}"
+            if strict:
+                raise RuntimeError(
+                    f"mesa_mcp.tools plugin {ep.name!r} ({ep.value}) failed to load: {exc}"
+                ) from exc
+            logger.warning(
+                "plugin.load_failed",
+                plugin=ep.name,
+                target=ep.value,
+                error=str(exc),
+                message=(
+                    "Tool plugin skipped; set MESA_MCP_SERVER__STRICT_PLUGINS=1 to fail instead."
+                ),
+            )
+        else:
+            _LOADED_PLUGINS[ep.name] = "loaded"
+    return dict(_LOADED_PLUGINS)
 
 
 def get_registered_tools() -> list[ToolSpec]:
@@ -348,6 +401,7 @@ class MesaServer:
 
     def __post_init__(self) -> None:
         if not self.tools:
+            load_plugins(strict=bool(getattr(self.config.server, "strict_plugins", False)))
             self.tools = get_registered_tools()
 
     async def call(
@@ -575,7 +629,11 @@ class MesaServer:
                     description=spec.description,
                     inputSchema=input_schema,
                     outputSchema=output_schema,
-                    _meta={"io.mesa/surface": _tool_surface(spec.name)},
+                    _meta={
+                        **spec.meta,
+                        "io.mesa/surface": spec.meta.get("io.mesa/surface")
+                        or _tool_surface(spec.name),
+                    },
                 )
             )
         return out
