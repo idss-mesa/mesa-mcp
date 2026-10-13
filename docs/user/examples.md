@@ -186,22 +186,41 @@ write made on that session is recorded into DuckLake with a `via_ticket`
 provenance column, so auditors can trace which changes came through
 shared credentials.
 
-## Planned: AVU time-travel
-
-Once `mesa_ducklake_*` lands:
+## AVU history
 
 ```text
 mesa_ducklake_init_project  -> bootstrap /.mesa/ducklake on a project
 mesa_avu_apply_term         -> writes AVU + records change row
-mesa_ducklake_history       -> list every AVU change for a path
+mesa_ducklake_history       -> read the change log for a path, or the
+                               AVU set in effect at a past timestamp
+```
+
+`mesa_ducklake_history` takes an iRODS path inside a MESA-enabled project
+and returns the DuckLake rows for it, newest first. Each row is one AVU
+add or delete with its snapshot id, actor, timestamp, and `via_ticket`
+provenance. Pass `as_of` (an ISO-8601 timestamp) to get the AVUs that
+were in effect at that instant instead of the log. `attribute` and
+`unit` are optional exact-match filters; `limit` defaults to 100 and is
+capped at 1000.
+
+```text
+mesa_ducklake_history irods_path=/iplant/home/alice/proj/data/sample.csv
+mesa_ducklake_history irods_path=... attribute=envo.biome
+mesa_ducklake_history irods_path=... as_of=2026-09-01T12:00:00Z
+```
+
+Both tools need `ducklake.catalog_dsn` set and the `mesa-ducklake` extra
+installed; otherwise they fail with `ducklake_disabled`.
+
+## Planned: AVU time-travel
+
+```text
 mesa_ducklake_time_travel   -> reconstruct AVU set at a past timestamp
 mesa_ducklake_diff          -> diff two snapshots
 ```
 
-The DuckLake facade in
-[`src/mesa_mcp/ducklake/client.py`](../../src/mesa_mcp/ducklake/client.py)
-defines the interface but every method currently raises
-`NotImplementedError`.
+These are not registered yet. `mesa_ducklake_history` with `as_of`
+already covers the single-timestamp case.
 
 ## See also
 
