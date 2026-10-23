@@ -44,8 +44,10 @@ dependencies = [
 # lazily and degrades to "mirroring disabled" when it is absent, so it is
 # genuinely optional — but it was previously declared nowhere, leaving no
 # supported way to install mesa-mcp *with* the feature enabled.
+# 0.2 is the DuckDB 2.0 release (quack:// catalogs, storage_version option).
+# mesa-ducklake is not on PyPI: install it from its checkout first.
 ducklake = [
-    "mesa-ducklake",
+    "mesa-ducklake>=0.2",
 ]
 dev = [
     "pytest",

@@ -51,6 +51,12 @@ ducklake:
   #   - DuckDB file (single-user / local-install, no external database;
   #     single-writer — one process holds the file lock at a time):
   #       duckdb:///absolute/path/to/catalog.duckdb
+  #     DuckDB 2.0 creates files DuckDB 1.x cannot open; append
+  #     ?storage_version=v1.5.0 if an older host must read a new file.
+  #   - Quack server (several writers sharing one DuckDB file, served by
+  #     `mesa-ducklake serve-catalog`; beta). Put the server's token in the
+  #     MESA_DUCKLAKE_QUACK_TOKEN environment variable, never in the DSN:
+  #       quack://catalog-host:9494
   catalog_dsn:
   # iRODS sub-collection (per project root) that holds Parquet data files.
   data_collection: .mesa/ducklake

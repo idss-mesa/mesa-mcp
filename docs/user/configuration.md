@@ -93,12 +93,20 @@ detail.
 
 | Field             | Default            | Description                                                        |
 | ----------------- | ------------------ | ------------------------------------------------------------------ |
-| `catalog_dsn`     | *(empty)*          | Postgres DSN for the DuckLake catalog. Empty disables mirroring.   |
+| `catalog_dsn`     | *(empty)*          | DSN for the DuckLake catalog (forms below). Empty disables mirroring. |
 | `data_collection` | `.mesa/ducklake`   | Per-project iRODS subcollection for Parquet data files.            |
 
-`mesa_ducklake_*` tools are planned; today the `DuckLakeClient` facade in
-[`ducklake/client.py`](../../src/mesa_mcp/ducklake/client.py) is stubbed
-and every method raises `NotImplementedError`.
+mesa-ducklake (install the `ducklake` extra, version 0.2 or newer, which
+requires DuckDB 2.0) picks the catalog backend from the DSN:
+
+| `catalog_dsn` | Backend |
+| --- | --- |
+| `postgresql://…` | Postgres. Hosted and multi-writer deployments. |
+| `duckdb:///abs/path/catalog.duckdb` | DuckDB file. Local installs; one process at a time. Append `?storage_version=v1.5.0` so DuckDB 1.x can still open a newly created file. |
+| `quack://host:port` | A DuckDB file served by `mesa-ducklake serve-catalog` (DuckDB 2.0 Quack, beta), shared by several writers. Set `MESA_DUCKLAKE_QUACK_TOKEN` to the server's token. |
+
+See mesa-ducklake's `docs/deploy/quack-catalog.md` for running the
+Quack server.
 
 ### `server` — transport, OIDC, logging
 
