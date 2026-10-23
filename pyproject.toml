@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mesa-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server bridging CyVerse iRODS, OBO/OLS ontology services, and DuckLake metadata history."
 readme = "README.md"
 requires-python = ">=3.11"
