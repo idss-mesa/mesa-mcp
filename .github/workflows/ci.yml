@@ -40,6 +40,37 @@ jobs:
       - name: Tests
         run: pytest -q
 
+  ducklake-integration:
+    # The main matrix installs mesa-mcp without the optional ducklake extra,
+    # so every DuckLake test there runs against stand-in modules. This job
+    # installs the real mesa-ducklake (and with it DuckDB 2.x) so the
+    # config -> facade -> DuckLakeClient path is exercised for real.
+    name: ducklake integration (DuckDB 2.x)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install "mesa-ducklake @ git+https://github.com/idss-mesa/mesa-ducklake@main"
+          pip install -e ".[dev,ducklake]"
+          python -c "import duckdb, mesa_ducklake; print('duckdb', duckdb.__version__, 'mesa-ducklake', mesa_ducklake.__version__)"
+
+      - name: DuckLake config tests (must not skip)
+        run: |
+          set -euo pipefail
+          pytest -q tests/test_config_active.py --no-header -rN | tee /tmp/dl.txt
+          if grep -qE '[0-9]+ skipped' /tmp/dl.txt; then
+            echo "::error::DuckLake integration tests were SKIPPED — mesa-ducklake is not importable"
+            exit 1
+          fi
+
   spec-conformance:
     # Separate job so a spec regression is legible at a glance in the PR
     # checks list rather than buried in the full suite's output.

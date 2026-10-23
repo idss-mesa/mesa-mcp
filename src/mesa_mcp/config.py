@@ -61,10 +61,19 @@ class OLSConfig(BaseModel):
 
 
 class DuckLakeConfig(BaseModel):
-    """Postgres catalog / DuckDB compute settings for mesa-ducklake."""
+    """Catalog / DuckDB compute settings for mesa-ducklake."""
 
-    # Postgres DSN for the DuckLake catalog. Empty disables DuckLake mirroring;
-    # AVU writes still succeed but are not recorded.
+    # DSN for the mesa-ducklake catalog; mesa-ducklake picks the backend:
+    #   postgresql://…                      Postgres (hosted, multi-writer)
+    #   duckdb:///abs/path/catalog.duckdb   DuckDB file (local, single writer);
+    #                                       add ?storage_version=v1.5.0 to keep a
+    #                                       new file readable by DuckDB 1.x
+    #   quack://host:port                   DuckDB file served by
+    #                                       `mesa-ducklake serve-catalog` (several
+    #                                       writers; token in the
+    #                                       MESA_DUCKLAKE_QUACK_TOKEN env var)
+    # Empty disables DuckLake mirroring; AVU writes still succeed but are not
+    # recorded.
     catalog_dsn: str | None = None
     # iRODS sub-collection (per project) that holds the Parquet data files,
     # relative to the project root. ducklake.client passes a non-default
