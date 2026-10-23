@@ -9,7 +9,11 @@ future-you (or a teammate) can pick this up cold.
 public IP `149.165.175.52`, internal hostname `mesa-mcp.js2local`).
 
 **Live URL:** <https://mesa-mcp.cis240692.projects.jetstream-cloud.org/healthz>
-returns `{"status": "ok", "version": "0.1.0"}`.
+returns `{"status": "ok", "version": "0.2.0"}` once the host runs the
+[`v0.2.0` release](https://github.com/idss-mesa/mesa-mcp/releases/tag/v0.2.0);
+it reported `0.1.0` before that, so redeploy to pick up the new version.
+On 2026-10-23 the hostname did not resolve from sparky-1, so the live
+version was not re-checked.
 
 **Systemd services (`systemctl is-active`):**
 
