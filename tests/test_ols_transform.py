@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from mesa_mcp.ols.client import _label_to_snake
 from mesa_mcp.ols.transform import (
+    RESERVED_PREFIXES,
     avus_to_ontology_annotations,
     detect_ontology_prefixes,
     extract_ontology_avus,
@@ -155,6 +156,18 @@ class TestDetectOntologyPrefixes:
         assert "datacite" not in ids
         assert "dc" not in ids
         assert "eml" not in ids
+
+    def test_croissant_prefix_is_reserved(self):
+        """Croissant keyword AVUs carry a CURIE unit but are not an ontology."""
+        avus = [
+            {"attribute": "croissant.name", "value": "Demo", "unit": ""},
+            {"attribute": "croissant.keyword.1", "value": "grassland", "unit": "ENVO:00000106"},
+            {"attribute": "Croissant.recordSet.1.id", "value": "ratings", "unit": ""},
+            {"attribute": "envo.biome", "value": "grassland", "unit": "ENVO:00000106"},
+        ]
+        ids = {r["ontologyId"] for r in detect_ontology_prefixes(avus)}
+        assert ids == {"envo"}
+        assert "croissant" in RESERVED_PREFIXES
 
     def test_counts_correct(self):
         avus = [

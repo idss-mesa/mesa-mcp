@@ -24,8 +24,12 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Prefixes reserved by other schemas — never interpret these as OLS ontologies.
+# ``croissant`` is the MLCommons Croissant AVU namespace (idss-mesa/mesa-croissant,
+# docs/AVU_CONVENTION.md section 1); its ``croissant.keyword.N`` AVUs carry a CURIE
+# unit but are not an ontology.
 RESERVED_PREFIXES: frozenset[str] = frozenset(
     {
+        "croissant",
         "datacite",
         "dc",
         "eml",
