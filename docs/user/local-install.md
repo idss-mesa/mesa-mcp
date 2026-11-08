@@ -58,6 +58,25 @@ The console script name is `mesa-mcp`. The published Python package
 name is `mesa-mcp` as well; when PyPI publication happens this page will
 swap `git+https://...` for `pip install mesa-mcp`.
 
+### Optional: Croissant metadata tools
+
+The `mesa_croissant_*` tools describe Data Store folders and files as
+[MLCommons Croissant](https://docs.mlcommons.org/croissant/) datasets,
+stored as `croissant.*` AVUs. They come from a separate plugin package,
+[idss-mesa/mesa-croissant](https://github.com/idss-mesa/mesa-croissant),
+which mesa-mcp loads through its `mesa_mcp.tools` entry point. Install
+it into the same virtualenv, then restart your MCP client:
+
+```bash
+~/.venvs/mesa-mcp/bin/pip install "mesa-croissant @ git+https://github.com/idss-mesa/mesa-croissant"
+```
+
+The `croissant` extra (`mesa-mcp[croissant]`) declares the same
+dependency by name; like `ducklake`, it needs the package installed from
+its repository first, because it is not on PyPI yet. A plugin that fails
+to import is skipped with a warning; set
+`MESA_MCP_SERVER__STRICT_PLUGINS=1` to make that a startup error.
+
 ## Configure iRODS credentials
 
 There are three supported ways to feed credentials to mesa-mcp. Pick
