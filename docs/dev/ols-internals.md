@@ -18,7 +18,8 @@ changing an existing one.
 is a pure-Python port with no behavioural changes from
 `esiil-portal/portal/services/ols_transform.py`. Reserved attribute
 prefixes (`datacite`, `dc`, `eml`, `ipc-`, `irods::`, `ipc_`) are
-unchanged.
+unchanged, plus `croissant` (MLCommons Croissant AVUs, see
+[mesa-croissant](https://github.com/idss-mesa/mesa-croissant)).
 
 ## API endpoints
 
@@ -99,8 +100,8 @@ identically to how the portal does it. Do not roll your own.
 A single AVU attribute carries one ontology prefix. If you need to
 record terms from two ontologies, write two AVUs. The detection
 function `detect_ontology_prefixes` in `transform.py` assumes this
-convention and skips reserved prefixes (`datacite`, `dc`, `eml`,
-`ipc-`, `irods::`, `ipc_`) automatically.
+convention and skips reserved prefixes (`croissant`, `datacite`, `dc`,
+`eml`, `ipc-`, `irods::`, `ipc_`) automatically.
 
 ## Round-trip invariants
 

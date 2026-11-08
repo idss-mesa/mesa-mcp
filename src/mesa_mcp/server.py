@@ -130,6 +130,10 @@ def _tool_surface(name: str) -> str:
         return "datacite"
     if name.startswith("mesa_policy_"):
         return "policy"
+    if name.startswith("mesa_croissant_"):
+        # The mesa-croissant plugin also declares this in its meta; the prefix rule keeps
+        # the family stable if a tool is registered without it.
+        return "croissant"
     if name.startswith("ds_"):
         return "irods"
     return "core"

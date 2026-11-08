@@ -78,3 +78,15 @@ def test_server_loads_plugins_on_construction(clean_registry, monkeypatch):
     cfg.server.strict_plugins = True
     MesaServer(config=cfg)
     assert seen == [False, True]
+
+
+def test_croissant_prefix_maps_to_its_surface(clean_registry):
+    """mesa-croissant's mesa_croissant_* tools get the ``croissant`` family even without meta."""
+    assert server._tool_surface("mesa_croissant_export") == "croissant"
+
+    @register_tool("mesa_croissant_zz_probe", "demo", input_model=_In)
+    async def handle(args: _In) -> dict:
+        return {"ok": True}
+
+    defs = {t.name: t for t in MesaServer(config=Config())._tool_definitions()}
+    assert defs["mesa_croissant_zz_probe"].meta["io.mesa/surface"] == "croissant"
