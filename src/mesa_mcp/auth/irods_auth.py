@@ -42,8 +42,8 @@ def build_account(
     -------
     iRODSAccount
         A populated account ready to be handed to ``iRODSSession``. For the
-        anonymous case the password is empty and ``irods_authentication_scheme``
-        is forced to ``anonymous`` per iRODS conventions.
+        anonymous case the user is ``anonymous``, the password is empty and the
+        scheme is ``native`` (see the note below).
 
     Notes
     -----
@@ -53,12 +53,18 @@ def build_account(
     target user and keeps ``proxy_user`` as the authenticated admin.
     """
     if auth_value.is_anonymous():
+        # iRODS anonymous access is a *native* login as the ``anonymous`` user with
+        # an empty password. ``python-irodsclient`` has no ``anonymous`` auth plugin
+        # (its plugins are native, pam_password, pam_interactive), so passing the
+        # scheme ``anonymous`` fails every call with "No module named
+        # 'irods.auth.anonymous'". ``AuthValue.auth_scheme`` stays ``anonymous``:
+        # that is how the rest of mesa-mcp recognises an anonymous caller.
         return iRODSAccount(
             irods_host=host,
             irods_port=port,
             irods_user_name=auth_value.username or "anonymous",
             irods_zone_name=auth_value.zone,
-            irods_authentication_scheme="anonymous",
+            irods_authentication_scheme="native",
             password="",
         )
 

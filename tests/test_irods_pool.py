@@ -176,12 +176,14 @@ def test_max_entries_must_be_positive():
         IRODSClientPool(max_entries=0)
 
 
-def test_factory_called_with_anonymous_scheme_for_anonymous_user():
+def test_factory_called_with_native_scheme_for_anonymous_user():
+    # python-irodsclient has no "anonymous" auth plugin: anonymous access is a
+    # native login as the anonymous user with an empty password.
     pool, factory = _make_pool()
     av = AuthValue(username="anonymous", zone="iplant", auth_scheme="anonymous")
     pool.get(av)
     kwargs = factory.call_args.kwargs
-    assert kwargs["authentication_scheme"] == "anonymous"
+    assert kwargs["authentication_scheme"] == "native"
     assert kwargs["password"] == ""
     assert kwargs["user"] == "anonymous"
 
@@ -195,3 +197,19 @@ def test_factory_called_with_native_scheme_and_password_for_native_user():
     assert kwargs["password"] == "hunter2"
     assert kwargs["user"] == "alice"
     assert kwargs["zone"] == "iplant"
+
+
+def test_anonymous_account_scheme_is_a_real_python_irodsclient_plugin():
+    """Every scheme build_account emits must be an auth plugin the installed
+    python-irodsclient ships (irods.auth.<scheme>); "anonymous" never was one."""
+    import importlib
+
+    from mesa_mcp.auth import build_account
+
+    for av in (
+        AuthValue(username="anonymous", zone="iplant", auth_scheme="anonymous"),
+        AuthValue(username="anonymous", zone="iplant"),
+        AuthValue(username="alice", zone="iplant", password="pw"),
+    ):
+        account = build_account(av, host="data.cyverse.org", port=1247)
+        importlib.import_module(f"irods.auth.{account.authentication_scheme}")
