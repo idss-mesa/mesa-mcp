@@ -108,6 +108,15 @@ requires DuckDB 2.0) picks the catalog backend from the DSN:
 See mesa-ducklake's `docs/deploy/quack-catalog.md` for running the
 Quack server.
 
+Two `mesa_ducklake_*` tools are registered today:
+`mesa_ducklake_init_project` (enroll a project) and
+`mesa_ducklake_history` (read a path's change log or its AVUs as of a
+timestamp). Both fail with `ducklake_disabled` when `catalog_dsn` is
+empty or the `mesa-ducklake` extra is not installed. The write tools
+(`ds_add_avu`, `ds_delete_avu`, `mesa_avu_apply_term`, ...) keep working
+without it; they just skip the history mirror.
+`mesa_ducklake_time_travel` and `mesa_ducklake_diff` are still planned.
+
 ### `server` — transport, OIDC, logging
 
 | Field                 | Default                | Description                                                                                                |
