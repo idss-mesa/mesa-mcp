@@ -5,7 +5,7 @@ time, grouped by prefix. Tools are listed alphabetically within each
 group. Each entry lists its description and input fields; for full
 output shapes, read the source module linked at the end of each entry.
 
-**Tools registered today: 44** across 4 groups.
+**Tools registered today: 51** across 6 groups.
 
 To regenerate this page from a checkout:
 
@@ -21,6 +21,7 @@ for spec in sorted(mesa_mcp.server.get_registered_tools(), key=lambda s: s.name)
 
 - [ds_*: CyVerse Data Store (iRODS)](#ds_-cyverse-data-store-irods)
 - [mesa_avu_*: AVU helpers (ontology-driven)](#mesa_avu_-avu-helpers-ontology-driven)
+- [mesa_ducklake_*: AVU history (DuckLake)](#mesa_ducklake_-avu-history-ducklake)
 - [mesa_ols_*: OBO Foundry / EBI Ontology Lookup Service](#mesa_ols_-obo-foundry--ebi-ontology-lookup-service)
 - [mesa_policy_*: MESA project policies](#mesa_policy_-mesa-project-policies)
 
@@ -510,6 +511,50 @@ Input fields:
 
 Source: search the codebase for `register_tool("mesa_avu_from_term"`.
 
+## mesa_ducklake_*: AVU history (DuckLake)
+
+Both tools need `ducklake.catalog_dsn` set and the `mesa-ducklake` extra
+installed. Otherwise they fail with `ducklake_disabled`. See
+[Configuration](./configuration.md#ducklake--avu-history-catalog).
+
+### `mesa_ducklake_history`
+
+Read the DuckLake AVU history for an iRODS path inside a MESA-enabled project. Without as_of, returns the change log (newest first). With as_of, returns the AVUs that were in effect at that timestamp. Optional exact-match filters on attribute and unit. Read-only.
+
+Input fields:
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `irods_path` (required) | `string` | Absolute iRODS path of the data object or collection whose AVU history to read. Must sit inside a MESA-enabled project. |
+| `attribute` | `string \| null` | Only return rows whose AVU attribute equals this string exactly. |
+| `unit` | `string \| null` | Only return rows whose AVU unit equals this string exactly. Pass an empty string to match rows with no unit. |
+| `as_of` | `string \| null` | ISO-8601 timestamp (``2026-09-01T12:00:00Z``). When set, return the AVUs in effect at that instant instead of the change log. A timestamp with no zone is read as UTC. |
+| `limit` | `integer` | Maximum number of rows to return. Default 100; values above 1000 are capped at 1000. |
+
+Output: `project_id`, `count`, and `rows`. Each row has the fields of a
+mesa-ducklake `AvuChange`: `project_id`, `snapshot_id`, `irods_path`,
+`target_type`, `attribute`, `value`, `unit`, `op` (`add` or `delete`),
+`actor`, `ts`, `source`, `via_ticket`, `rule_invocation`.
+
+Errors: `not_mesa_project` when no ancestor collection carries
+`mesa.enabled=true`; `history_project_not_registered` when the AVU is
+present but the catalog has no row (run `mesa_ducklake_init_project`);
+`invalid_argument` for a malformed `as_of`.
+
+Source: search the codebase for `register_tool("mesa_ducklake_history"`.
+
+### `mesa_ducklake_init_project`
+
+Enroll an iRODS collection as a MESA project. Creates the <irods_path>/.mesa/ducklake/ sub-collection (or the configured ducklake.data_collection), sets the mesa.enabled=true AVU on the project root, and registers the project in the DuckLake catalog. Idempotent — safe to re-run.
+
+Input fields:
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `irods_path` (required) | `string` | Absolute iRODS path of the project's root collection — the collection that will carry the ``mesa.enabled=true`` AVU and host the DuckLake history sub-collection. |
+
+Source: search the codebase for `register_tool("mesa_ducklake_init_project"`.
+
 ## mesa_ols_*: OBO Foundry / EBI Ontology Lookup Service
 
 ### `mesa_ols_generate_template`
@@ -625,5 +670,5 @@ Source: search the codebase for `register_tool("mesa_policy_enable"`.
 - [Examples](./examples.md)
 - [Adding tools](../dev/adding-tools.md)
 
-Last synced: 2026-05-10. Re-run the enumeration command
+Last synced: 2026-10-12. Re-run the enumeration command
 at the top of this page after adding or removing tools.
