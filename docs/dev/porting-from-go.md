@@ -1,3 +1,27 @@
+---
+type: Guide
+title: Porting from Go
+description: Cookbook for porting a ds_* tool from the Go cyverse/irods-mcp-server so names, input schemas and output shapes match byte for byte, with the go-irodsclient to python-irodsclient translation table and a worked example.
+tags:
+- irods
+- porting
+- parity
+generated:
+  by: claude/opus-5.5
+  at: '2026-11-24T00:00:00Z'
+sources:
+- id: irods-mcp-server
+  resource: https://github.com/cyverse/irods-mcp-server
+  title: cyverse/irods-mcp-server (Go reference)
+  author: team:cyverse
+- id: irods-tools
+  resource: https://github.com/idss-mesa/mesa-mcp/tree/main/src/mesa_mcp/irods/tools
+  title: ds_* tool modules
+  author: team:idss-mesa
+status: stable
+stale_after: '2027-05-24T00:00:00Z'
+---
+
 # Porting from Go (cyverse/irods-mcp-server)
 
 What this page covers: how to translate a `ds_*` tool from the Go
@@ -8,7 +32,7 @@ at the MCP wire level: tool names, descriptions, input schemas, and
 output shapes must match the Go source byte-for-byte.
 
 This guide is the same checklist the `irods-tool-porter` sub-agent at
-[`.claude/agents/irods-tool-porter.md`](../../.claude/agents/irods-tool-porter.md)
+[`.claude/agents/irods-tool-porter.md`](https://github.com/idss-mesa/mesa-mcp/blob/main/.claude/agents/irods-tool-porter.md)
 follows. Invoke that agent for batch ports; read on for the manual
 walkthrough.
 
@@ -23,8 +47,9 @@ it.
 
 ## Source of truth
 
-The Go file at
-`/home/exouser/irods-mcp-server/irods/<tool_name>.go` is the spec.
+The Go file `irods/<tool_name>.go` in a checkout of
+[`cyverse/irods-mcp-server`](https://github.com/cyverse/irods-mcp-server)
+is the spec.
 Open it before writing any Python. The interface contract lives in
 `irods-mcp-server/irods/interface.go`:
 
@@ -77,22 +102,23 @@ middleware refuses any path outside the returned set. In Python:
 ```python
 from mesa_mcp.irods.access import assert_allowed
 
-async def handle_list_directory(args, ctx):
-    path = assert_allowed(args.path, ctx.auth_value)
+async def handle_list_directory(args, *, auth_value=None):
+    path = assert_allowed(args.path, auth_value)
     # ... use `path` (normalised) in all iRODS calls below ...
 ```
 
 `assert_allowed` returns the normalised path. **Use the return value** —
 do not pass `args.path` to the iRODS calls — so handlers can never drift
 off the access-checked path. The implementation lives in
-[`access.py`](../../src/mesa_mcp/irods/access.py).
+[`access.py`](https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/irods/access.py).
 
 ## Connection management
 
 Don't open `iRODSSession` directly inside the handler. Take it from
-the per-process `IRODSClientPool` keyed by `AuthValue.cache_key()`. The
+the per-process `IRODSClientPool` keyed by `AuthValue.cache_key()`;
+handlers call `default_pool().get(auth_value)`. The
 pool lives in
-[`client_pool.py`](../../src/mesa_mcp/irods/client_pool.py); it LRU-evicts
+[`client_pool.py`](https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/irods/client_pool.py); it LRU-evicts
 when the cap is hit. Construction looks like this from a fixture or
 bootstrap:
 
@@ -118,36 +144,44 @@ Imagine you are porting `ds_list_directory` from
 2. **Create** `src/mesa_mcp/irods/tools/list_directory.py`:
 
    ```python
-   from pydantic import BaseModel, Field
    from typing import Any
 
+   from pydantic import BaseModel, Field
+
+   from mesa_mcp.auth.models import AuthValue
    from mesa_mcp.errors import ToolError
    from mesa_mcp.irods.access import assert_allowed
+   from mesa_mcp.irods.client_pool import default_pool
    from mesa_mcp.server import register_tool
 
 
    class ListDirectoryInput(BaseModel):
-       path: str = Field(..., description="Absolute iRODS logical path.")
-       limit: int = Field(100, ge=1, le=10000)
+       path: str = Field(..., description="<copied from the Go schema>")
+       # ... every other property, with the Go description and default ...
 
 
    @register_tool(
        "ds_list_directory",
-       "List entries (subcollections + data objects) in an iRODS collection.",
+       "<the Go description string, verbatim>",
        input_model=ListDirectoryInput,
    )
-   async def handle_list_directory(args: ListDirectoryInput) -> dict[str, Any]:
-       # context plumbing for auth_value + session pool will land with
-       # the iRODS auth PR. For now this stub matches the wire shape.
-       ...
+   async def handle_list_directory(
+       args: ListDirectoryInput, *, auth_value: AuthValue | None = None
+   ) -> dict[str, Any]:
+       if auth_value is None:
+           raise ToolError(code="unauthenticated", message="ds_list_directory requires a caller.")
+       path = assert_allowed(args.path, auth_value)
+       session = default_pool().get(auth_value)
+       ...  # iRODS calls, then build the Go response shape
    ```
 
-3. **Register**. The file lives in `irods/tools/`; when that directory
-   gains an auto-discovery `__init__.py` (mirroring `ols/tools/`), the
-   tool wires itself up on import. Until then, register it manually
-   from `irods/tools/__init__.py`.
+   The real module is
+   [`src/mesa_mcp/irods/tools/list_directory.py`](https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/irods/tools/list_directory.py).
 
-4. **Test**. Add `tests/irods/test_list_directory.py` using the
+3. **Register**. Nothing to do: `irods/tools/__init__.py` imports every
+   module in the directory, so the decorator fires on import.
+
+4. **Test**. Add a test under `tests/irods/` using the
    `mock_irods_session` fixture in `tests/conftest.py`. Assert against
    the call shape, not the network.
 
@@ -173,7 +207,7 @@ Imagine you are porting `ds_list_directory` from
 ## Reviewer checklist
 
 Before opening a PR, run the `mcp-reviewer` sub-agent from
-[`.claude/agents/mcp-reviewer.md`](../../.claude/agents/mcp-reviewer.md).
+[`.claude/agents/mcp-reviewer.md`](https://github.com/idss-mesa/mesa-mcp/blob/main/.claude/agents/mcp-reviewer.md).
 It checks MCP wire-format parity with the Go source, path-access
 enforcement, AVU shape, DuckLake recording, security hygiene, and test
 coverage. See [Contributing](./contributing.md) for the broader PR
@@ -185,5 +219,5 @@ workflow.
 - [Adding tools](./adding-tools.md)
 - [Testing](./testing.md)
 - [Contributing](./contributing.md)
-- [`.claude/agents/irods-tool-porter.md`](../../.claude/agents/irods-tool-porter.md)
-- [`.claude/agents/mcp-reviewer.md`](../../.claude/agents/mcp-reviewer.md)
+- [`.claude/agents/irods-tool-porter.md`](https://github.com/idss-mesa/mesa-mcp/blob/main/.claude/agents/irods-tool-porter.md)
+- [`.claude/agents/mcp-reviewer.md`](https://github.com/idss-mesa/mesa-mcp/blob/main/.claude/agents/mcp-reviewer.md)

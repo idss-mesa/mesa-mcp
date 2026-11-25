@@ -1,3 +1,22 @@
+---
+type: Plan
+title: DataCite support implementation plan
+description: Historical task-by-task plan (2026-06-08) that implemented the DataCite tools; its checkboxes are not maintained, so trust the code and tests over it.
+tags:
+- design
+- datacite
+- plan
+generated:
+  by: claude/opus-5.5
+  at: '2026-11-24T00:00:00Z'
+sources:
+- id: datacite
+  resource: https://github.com/idss-mesa/mesa-mcp/tree/main/src/mesa_mcp/datacite
+  title: Implemented datacite package
+  author: team:idss-mesa
+status: deprecated
+---
+
 # DataCite Support Implementation Plan
 
 > **Status:** implemented; checkboxes below are historical and not maintained.
@@ -6,13 +25,13 @@
 
 **Architecture:** Mirror the existing OLS/OBO package shape (`src/mesa_mcp/ols/`) for a *standard* instead of an *ontology*: a static schema module, a pure transform module, an export module, and auto-registered tools that reuse the existing AVU-write plumbing (`ds_add_avus` + `record_avu_changes`). No mesa-ducklake change.
 
-**Tech Stack:** Python 3.11, Pydantic v2 (already a dep), stdlib `xml.etree.ElementTree`, pytest. Tests run with `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest` from the `mesa-mcp/` repo root.
+**Tech Stack:** Python 3.11, Pydantic v2 (already a dep), stdlib `xml.etree.ElementTree`, pytest. Tests run with `.venv/bin/python -m pytest` from the `mesa-mcp/` repo root.
 
 **Spec:** `docs/design/2026-06-08-datacite-support-design.md`
 
 **Conventions for every command below:**
-- `PY=/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python`
-- Run all `pytest`/`ruff`/`mypy` from `/Users/tswetnam/Desktop/mesa-ai-test/mesa-mcp`
+- `PY=.venv/bin/python`
+- Run all `pytest`/`ruff`/`mypy` from `<mesa-mcp checkout>`
 - Commit trailer (append to every commit message):
   `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
 
@@ -42,11 +61,11 @@
 
 - [ ] **Step 1: Branch from main**
 ```bash
-cd /Users/tswetnam/Desktop/mesa-ai-test/mesa-mcp
+cd <mesa-mcp checkout>
 git checkout main && git checkout -b feat/datacite-support
 ```
 - [ ] **Step 2: Baseline the suite**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest -q`
+Run: `.venv/bin/python -m pytest -q`
 Expected: passes (the known pre-existing `test_ols_client.py` errors about a missing `mocker` fixture are unrelated; everything else green).
 
 ---
@@ -101,7 +120,7 @@ def test_missing_mandatory_field_raises():
 ```
 
 - [ ] **Step 2: Run to verify it fails**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_schema.py -q`
+Run: `.venv/bin/python -m pytest tests/test_datacite_schema.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'mesa_mcp.datacite'`.
 
 - [ ] **Step 3: Create the package + schema**
@@ -272,7 +291,7 @@ class DataCiteMetadata(BaseModel):
 ```
 
 - [ ] **Step 4: Run to verify it passes**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_schema.py -q`
+Run: `.venv/bin/python -m pytest tests/test_datacite_schema.py -q`
 Expected: PASS (4 passed).
 
 - [ ] **Step 5: Commit**
@@ -305,7 +324,7 @@ def test_legacy_crosswalk_covers_template_fields():
 ```
 
 - [ ] **Step 2: Run to verify it fails**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_schema.py::test_legacy_crosswalk_covers_template_fields -q`
+Run: `.venv/bin/python -m pytest tests/test_datacite_schema.py::test_legacy_crosswalk_covers_template_fields -q`
 Expected: FAIL — `ImportError: cannot import name 'LEGACY_CROSSWALK'`.
 
 - [ ] **Step 3: Append the crosswalk to `schema.py`**
@@ -339,7 +358,7 @@ LEGACY_CROSSWALK: dict[str, str] = {
 ```
 
 - [ ] **Step 4: Run to verify it passes**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_schema.py -q`
+Run: `.venv/bin/python -m pytest tests/test_datacite_schema.py -q`
 Expected: PASS (5 passed).
 
 - [ ] **Step 5: Commit**
@@ -402,7 +421,7 @@ def test_canonical_avus_scalars_and_indexed():
 ```
 
 - [ ] **Step 2: Run to verify it fails**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_transform.py -q`
+Run: `.venv/bin/python -m pytest tests/test_datacite_transform.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'mesa_mcp.datacite.transform'`.
 
 - [ ] **Step 3: Create `transform.py` (canonical only for now)**
@@ -485,7 +504,7 @@ def datacite_to_avus(record: DataCiteMetadata, naming: str = "canonical") -> lis
 ```
 
 - [ ] **Step 4: Run to verify it passes**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_transform.py -q`
+Run: `.venv/bin/python -m pytest tests/test_datacite_transform.py -q`
 Expected: PASS (1 passed).
 
 - [ ] **Step 5: Commit**
@@ -526,7 +545,7 @@ def test_both_is_superset():
 ```
 
 - [ ] **Step 2: Run to verify it fails**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_transform.py -q`
+Run: `.venv/bin/python -m pytest tests/test_datacite_transform.py -q`
 Expected: FAIL — `ValueError: unsupported naming: 'cyverse_template'`.
 
 - [ ] **Step 3: Add the cyverse_template + both branches**
@@ -583,7 +602,7 @@ def datacite_to_avus(record: DataCiteMetadata, naming: str = "canonical") -> lis
 ```
 
 - [ ] **Step 4: Run to verify it passes**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_transform.py -q`
+Run: `.venv/bin/python -m pytest tests/test_datacite_transform.py -q`
 Expected: PASS (3 passed).
 
 - [ ] **Step 5: Commit**
@@ -618,7 +637,7 @@ def test_canonical_round_trip():
 ```
 
 - [ ] **Step 2: Run to verify it fails**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_transform.py::test_canonical_round_trip -q`
+Run: `.venv/bin/python -m pytest tests/test_datacite_transform.py::test_canonical_round_trip -q`
 Expected: FAIL — `ImportError: cannot import name 'avus_to_datacite'`.
 
 - [ ] **Step 3: Add `avus_to_datacite` to `transform.py`**
@@ -695,7 +714,7 @@ def avus_to_datacite(avus: list[_Avu]) -> DataCiteMetadata:
 ```
 
 - [ ] **Step 4: Run to verify it passes**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_transform.py -q`
+Run: `.venv/bin/python -m pytest tests/test_datacite_transform.py -q`
 Expected: PASS (4 passed).
 
 - [ ] **Step 5: Commit**
@@ -753,7 +772,7 @@ def test_json_has_attributes_block():
 ```
 
 - [ ] **Step 2: Run to verify it fails**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_export.py -q`
+Run: `.venv/bin/python -m pytest tests/test_datacite_export.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'mesa_mcp.datacite.export'`.
 
 - [ ] **Step 3: Create `export.py`**
@@ -843,7 +862,7 @@ def datacite_to_json(rec: DataCiteMetadata) -> str:
 ```
 
 - [ ] **Step 4: Run to verify it passes**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_export.py -q`
+Run: `.venv/bin/python -m pytest tests/test_datacite_export.py -q`
 Expected: PASS (2 passed).
 
 - [ ] **Step 5: Commit**
@@ -899,7 +918,7 @@ def test_validate_flags_missing_doi():
 ```
 
 - [ ] **Step 2: Run to verify it fails**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_tools.py -q`
+Run: `.venv/bin/python -m pytest tests/test_datacite_tools.py -q`
 Expected: FAIL — registry missing the tools / import errors.
 
 - [ ] **Step 3: Create the tools package + two tools, register it**
@@ -1044,7 +1063,7 @@ imports `mesa_mcp.ols`, `mesa_mcp.irods.tools`, `mesa_mcp.ducklake.tools`) and a
 ```
 
 - [ ] **Step 4: Run to verify it passes**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_tools.py -q`
+Run: `.venv/bin/python -m pytest tests/test_datacite_tools.py -q`
 Expected: PASS (3 passed). If `_REGISTRY` is not importable from `mesa_mcp.server`, read `server.py` to find
 the registry's exported name and adjust the test import accordingly.
 
@@ -1093,9 +1112,9 @@ def test_apply_datacite_validates_then_bulk_writes(monkeypatch):
         "creators": [{"name": "Alcock, Thomas"}], "publisher": "CyVerse",
         "publicationYear": 2016, "resourceTypeGeneral": "Image",
     }
-    auth = AuthValue(username="tswetnam", zone="iplant", password="x")
+    auth = AuthValue(username="alice", zone="iplant", password="x")
     res = asyncio.run(handle_apply_datacite(
-        ApplyDataCiteInput(target="/iplant/home/tswetnam/proj", record=record, naming="both"),
+        ApplyDataCiteInput(target="/iplant/home/alice/proj", record=record, naming="both"),
         auth_value=auth))
     assert res["written"] >= 7
     assert mirror.await_count == 1          # one batched DuckLake snapshot
@@ -1108,18 +1127,18 @@ def test_apply_datacite_rejects_invalid(monkeypatch):
     from mesa_mcp.datacite.tools.apply import handle_apply_datacite, ApplyDataCiteInput
     from mesa_mcp.errors import ToolError
     from mesa_mcp.auth.models import AuthValue
-    auth = AuthValue(username="tswetnam", zone="iplant", password="x")
+    auth = AuthValue(username="alice", zone="iplant", password="x")
     bad = {"identifier": "x", "titles": ["T"], "creators": [{"name": "A"}],
            "publisher": "p", "publicationYear": 2016, "resourceTypeGeneral": "NotAType"}
     import pytest
     with pytest.raises(ToolError):
         asyncio.run(handle_apply_datacite(
-            ApplyDataCiteInput(target="/iplant/home/tswetnam/proj", record=bad),
+            ApplyDataCiteInput(target="/iplant/home/alice/proj", record=bad),
             auth_value=auth))
 ```
 
 - [ ] **Step 2: Run to verify it fails**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_tools.py -q`
+Run: `.venv/bin/python -m pytest tests/test_datacite_tools.py -q`
 Expected: FAIL — `ModuleNotFoundError: ...datacite.tools.apply`.
 
 - [ ] **Step 3: Create `apply.py`**
@@ -1200,7 +1219,7 @@ async def handle_apply_datacite(
 ```
 
 - [ ] **Step 4: Run to verify it passes**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_tools.py -q`
+Run: `.venv/bin/python -m pytest tests/test_datacite_tools.py -q`
 Expected: PASS. (If `AuthValue(...)` needs different constructor args, read `src/mesa_mcp/auth/models.py`
 and adjust the test's `AuthValue(...)` call — it only needs `.username` and `.zone` here.)
 
@@ -1240,7 +1259,7 @@ def test_export_tool_emits_xml():
 ```
 
 - [ ] **Step 2: Run to verify it fails**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_tools.py::test_export_tool_emits_xml -q`
+Run: `.venv/bin/python -m pytest tests/test_datacite_tools.py::test_export_tool_emits_xml -q`
 Expected: FAIL — `ModuleNotFoundError: ...datacite.tools.export`.
 
 - [ ] **Step 3: Create `export.py` (the tool)**
@@ -1285,11 +1304,11 @@ async def handle_datacite_export(args: ExportInput) -> dict[str, Any]:
 ```
 
 - [ ] **Step 4: Run + full suite + lint + types**
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests/test_datacite_tools.py -q` → PASS.
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest tests -k datacite -q` → all datacite tests PASS.
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/python -m pytest -q` → no NEW failures (pre-existing `test_ols_client.py` mocker errors excepted).
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/ruff check src/mesa_mcp/datacite tests/test_datacite_*.py` → fix until "All checks passed!".
-Run: `/Users/tswetnam/Desktop/mesa-ai-test/.venv/bin/mypy src/mesa_mcp/datacite` → resolve issues these files introduce.
+Run: `.venv/bin/python -m pytest tests/test_datacite_tools.py -q` → PASS.
+Run: `.venv/bin/python -m pytest tests -k datacite -q` → all datacite tests PASS.
+Run: `.venv/bin/python -m pytest -q` → no NEW failures (pre-existing `test_ols_client.py` mocker errors excepted).
+Run: `.venv/bin/ruff check src/mesa_mcp/datacite tests/test_datacite_*.py` → fix until "All checks passed!".
+Run: `.venv/bin/mypy src/mesa_mcp/datacite` → resolve issues these files introduce.
 
 - [ ] **Step 5: Docs + commit**
 Add one paragraph to `CLAUDE.md` under the tool surface: a new **Group 2b — DataCite descriptive metadata**

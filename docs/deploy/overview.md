@@ -1,3 +1,23 @@
+---
+type: Reference
+title: Deployment overview
+description: 'Topology and components of a hosted mesa-mcp (Mode A): a systemd service running the HTTP transport behind nginx and TLS, CyVerse Keycloak tokens, an optional Postgres catalog for AVU history, and the as-deployed VM.'
+tags:
+- deploy
+- hosted
+- topology
+generated:
+  by: claude/opus-5.5
+  at: '2026-11-24T00:00:00Z'
+sources:
+- id: deploy-dir
+  resource: https://github.com/idss-mesa/mesa-mcp/tree/main/deploy
+  title: Deployment artifacts (systemd, nginx, installers)
+  author: team:idss-mesa
+status: stable
+stale_after: '2027-02-24T00:00:00Z'
+---
+
 # Deployment overview
 
 What this page covers: the **hosted-service** production topology
@@ -33,90 +53,51 @@ The topology, component table, and run-mode notes below describe
 ## Topology
 
 ```
-                                                              ┌──────────────────────┐
-                                                              │  CyVerse iRODS       │
-                                                              │  data.cyverse.org    │
-                                                              │  port 1247           │
-                                                              └──────────▲───────────┘
-                                                                         │ iRODS native
-                                                                         │ protocol
-                              ┌──────────────────────────────────────────┴───────────┐
-                              │                                                      │
-                              │             VM (Ubuntu 24.04)                        │
-                              │             /home/exouser/mesa-mcp                   │
-                              │                                                      │
-   ┌──────────────────────┐   │   ┌─────────────────────────────────────────────┐    │
-   │  MCP client          │   │   │  mesa-mcp (systemd unit, exouser)            │    │
-   │  Claude Desktop /    │◀─ stdio ─▶│  src/mesa_mcp/server.py                   │    │
-   │  Claude Code /       │   │   │   tool registry + auth + iRODS pool         │    │
-   │  Inspector           │   │   └─────────────┬───────────────────────────────┘    │
-   └──────────────────────┘   │                 │                                    │
-                              │                 │  Postgres (planned)                │
-                              │                 ▼                                    │
-                              │   ┌─────────────────────────────────────────────┐    │
-                              │   │  postgresql@15-main (systemd)               │    │
-                              │   │  database: mesa_ducklake                    │    │
-                              │   │  (catalog for mesa-ducklake — planned)      │    │
-                              │   └─────────────────────────────────────────────┘    │
-                              │                                                      │
-                              │   ┌─────────────────────────────────────────────┐    │
-                              │   │  nginx + Let's Encrypt (planned, when SSE)  │    │
-                              │   └─────────────────────────────────────────────┘    │
-                              │                                                      │
-                              └──────────────────────────────────────────────────────┘
-
-                              ┌──────────────────────┐
-                              │  EMBL-EBI OLS4 API   │
-                              │  www.ebi.ac.uk       │
-                              │  (public, no auth)   │
-                              └──────────────────────┘
-                                         ▲
-                                         │ HTTPS (cached via cachetools.TTLCache)
-                                         │
-                              ┌──────────┴───────────┐
-                              │  mesa-mcp (in proc)  │
-                              └──────────────────────┘
-
-                              ┌──────────────────────┐
-                              │  CyVerse Keycloak    │
-                              │  kc.cyverse.org      │
-                              │  (planned, for SSE)  │
-                              └──────────────────────┘
+  MCP clients                         VM (Ubuntu 24.04)
+  ───────────                         ─────────────────────────────────────────────
+  claude.ai connector ──HTTPS /mcp──┐
+  mcp-remote bridge  ──HTTPS /sse───┼─▶ nginx + Let's Encrypt (TLS, SSE-safe proxying)
+  (Claude Desktop, Code,            │        │ http://127.0.0.1:8080
+   Cline, Continue)                 │        ▼
+                                    │   mesa-mcp --transport sse   (systemd unit)
+                                    │     Starlette + uvicorn
+                                    │     OIDC bearer check on every route except
+                                    │     /healthz and /.well-known/oauth-protected-resource
+                                    │        │            │              │
+                                    │        │            │              └─▶ Postgres: mesa_ducklake
+                                    │        │            │                  (mesa-ducklake catalog;
+                                    │        │            │                   only for AVU history)
+                                    │        │            └─▶ EMBL-EBI OLS4 API (HTTPS, public)
+                                    │        └─▶ CyVerse iRODS, data.cyverse.org:1247
+                                    │             (incl. <project>/.mesa/ducklake/ Parquet)
+  CyVerse Keycloak (kc.cyverse.org) ◀── JWKS / discovery fetched by mesa-mcp; tokens minted by clients
 ```
 
 ## Component table
 
-| Component                           | Role                                                                 | Status                          |
-| ----------------------------------- | -------------------------------------------------------------------- | ------------------------------- |
-| `mesa-mcp` (systemd service)        | The Python MCP server. Stdio transport today, SSE planned.           | Shipping (stdio only)           |
-| `python-irodsclient` (in process)   | Native iRODS protocol to `data.cyverse.org:1247`.                    | Library installed; tools land   |
-| OLS HTTP client (in process)        | `https://www.ebi.ac.uk/ols4/api/v2`, cached via `cachetools.TTLCache`. | Shipping                        |
-| Postgres `mesa_ducklake` database   | DuckLake catalog (for the sibling `mesa-ducklake` project).          | Planned                         |
-| nginx + Let's Encrypt               | Reverse proxy fronting the SSE port, terminating TLS.                | Planned (only needed for SSE)   |
-| CyVerse Keycloak                    | OIDC IdP for the SSE transport.                                      | Planned                         |
-| journald                            | Log sink for the systemd unit.                                       | Shipping                        |
+| Component | Role | Page |
+| --- | --- | --- |
+| `mesa-mcp` systemd service | The MCP server, run with `--transport sse`: old-style SSE at `/sse`, Streamable HTTP at `/mcp`, `/healthz`, RFC 9728 metadata. | [systemd](./systemd.md), [HTTP / SSE](./http-sse.md) |
+| nginx + Let's Encrypt | Terminates TLS and proxies to the local port with SSE buffering turned off. | [Nginx + TLS](./nginx-tls.md) |
+| CyVerse Keycloak | Issues the bearer JWTs mesa-mcp verifies. | [OIDC](./oidc.md) |
+| `python-irodsclient` (in process) | Native iRODS protocol to `data.cyverse.org:1247`. | — |
+| OLS client (in process) | `https://www.ebi.ac.uk/ols4/api/v2`, with in-process TTL caches. | — |
+| mesa-ducklake (in process) + Postgres `mesa_ducklake` | AVU history catalog. Optional: without `ducklake.catalog_dsn`, history is off. | [Postgres](./postgres.md) |
+| journald | Log sink for the unit. | [Monitoring](./monitoring.md) |
 
 ## Run modes
 
-mesa-mcp has two intended run modes:
-
 1. **stdio under an MCP client.** The client launches `mesa-mcp` as a
-   subprocess, talks to it over stdin/stdout. No port, no TLS, no
-   IdP. This is what works today. See
-   [`../user/claude-desktop.md`](../user/claude-desktop.md) for client
-   wiring.
-2. **Long-running daemon, SSE over HTTP.** mesa-mcp runs as a systemd
-   service listening on a local TCP port; nginx fronts it with TLS; a
-   CyVerse Keycloak bearer token authenticates each connection. This
-   is the planned remote-access path. The implementation is gated on
-   the OIDC PR; see [`./http-sse.md`](./http-sse.md) and
-   [`./oidc.md`](./oidc.md).
+   subprocess. No port, TLS or IdP. This is Modes B and C; see
+   [`../user/claude-desktop.md`](../user/claude-desktop.md).
+2. **Long-running HTTP service.** mesa-mcp runs as a systemd service on
+   a local port, nginx fronts it with TLS, and a CyVerse Keycloak bearer
+   token authenticates each request. This is Mode A, described on the
+   pages in this section. Users connect as in
+   [Hosted mesa-mcp](../user/hosted-mcp.md).
 
-Mode (1) does not need most of what follows — no nginx, no Keycloak,
-no remote port. The systemd unit in [`./systemd.md`](./systemd.md) is
-still useful as a convenience launcher under one consistent user, and
-the Postgres setup in [`./postgres.md`](./postgres.md) is required for
-the eventual DuckLake integration regardless of transport.
+The Postgres setup in [`./postgres.md`](./postgres.md) is needed only for
+the AVU history, in either mode.
 
 ## VM facts (the as-deployed environment)
 
@@ -134,11 +115,11 @@ the eventual DuckLake integration regardless of transport.
 
 ## Reference units
 
-- [`/home/exouser/esiil-portal/esiil-portal.service`](../../README.md)
+- [`/home/exouser/esiil-portal/esiil-portal.service`](https://github.com/idss-mesa/mesa-mcp/blob/main/README.md)
   — the security-hardened systemd unit on this VM. Mesa-mcp's unit
   borrows its `ProtectSystem=strict`, `ProtectHome=read-only`,
   `ReadWritePaths`, and append-only log file patterns.
-- [`/home/exouser/irods-mcp-server/install/irods-mcp-server.service`](../../README.md)
+- [`/home/exouser/irods-mcp-server/install/irods-mcp-server.service`](https://github.com/idss-mesa/mesa-mcp/blob/main/README.md)
   — the much simpler reference unit from the Go sibling. Useful for
   cross-checking the minimum viable `[Unit]` / `[Service]` block.
 
@@ -155,4 +136,4 @@ the eventual DuckLake integration regardless of transport.
 - [`../user/vice-apps.md`](../user/vice-apps.md) — Mode C inside a
   CyVerse VICE app.
 - [`../user/configuration.md`](../user/configuration.md)
-- [`../../CLAUDE.md`](../../CLAUDE.md)
+- [`../../CLAUDE.md`](https://github.com/idss-mesa/mesa-mcp/blob/main/CLAUDE.md)

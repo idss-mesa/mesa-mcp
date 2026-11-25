@@ -1,0 +1,186 @@
+# Questions an AI agent should be able to answer from mesa-mcp's published
+# documentation, starting at https://idss-mesa.github.io/llms.txt.
+# Format: agent-questions.spec.md in idss-mesa/idss-mesa.github.io.
+# Every answer was checked against src/mesa_mcp/ on 2026-11-24.
+repo: idss-mesa/mesa-mcp
+questions:
+  - id: why-in-process-ducklake
+    kind: engineering
+    q: "Why does mesa-mcp import mesa-ducklake as a Python library instead of calling it as a separate service?"
+    answer: >
+      The recorded decision is that mesa-ducklake is a Python package imported in-process, so its
+      DuckDB connections live in the mesa-mcp process. mesa-mcp keeps the import surface narrow
+      through one facade, src/mesa_mcp/ducklake/client.py (get_default_client, record_avu_change,
+      record_avu_changes), so the two repos can evolve independently and a later out-of-process
+      split stays cheap. mesa-ducklake is the optional `ducklake` extra; without it, or without a
+      catalog DSN, mirroring is a silent no-op.
+    must_find:
+      - ['in-process']
+      - ['get_default_client', 'record_avu_change']
+      - ['out-of-process']
+      - ['catalog_dsn', 'ducklake. extra', 'optional']
+    where: docs/dev/ducklake-integration.md
+
+  - id: history-mcp-vs-python-api
+    kind: engineering
+    q: "Which mesa-ducklake history operations can an agent call as MCP tools, and which exist only in the Python API?"
+    answer: >
+      Three history tools are registered: mesa_ducklake_init_project, mesa_ducklake_history and
+      mesa_ducklake_time_travel. DuckLakeClient.diff, list_snapshots, get_avus, get_project and
+      recover_pending_pushes exist only on the mesa_ducklake Python API. The
+      mesa_ducklake_snapshot and mesa_ducklake_diff tools named in older plans are not registered.
+    must_find:
+      - ['mesa_ducklake_time_travel']
+      - ['mesa_ducklake_init_project']
+      - ['list_snapshots']
+      - ['not registered']
+    where: docs/dev/ducklake-integration.md
+
+  - id: avu-write-mirror
+    kind: engineering
+    q: "When an agent adds an AVU through mesa-mcp, how does the change end up in the metadata history?"
+    answer: >
+      After the iRODS write succeeds, the tool calls record_avu_change (record_avu_changes for bulk
+      tools, which write one snapshot). It walks the path's ancestors for a collection with
+      mesa.enabled=true, finds or registers that project in the catalog, and calls
+      DuckLakeClient.record_changes with an AvuChange whose actor is the iRODS user, source is
+      "mesa-mcp:<tool name>", and via_ticket is the ticket bound by ds_use_ticket. Only path
+      targets are mirrored. If the mirror fails, the iRODS change stands and the result carries
+      partial_failure with code ducklake_mirror_failed.
+    must_find:
+      - ['record_avu_change']
+      - ['mesa\.enabled']
+      - ['ducklake_mirror_failed']
+      - ['via_ticket']
+    where: docs/dev/ducklake-integration.md
+
+  - id: add-a-tool
+    kind: engineering
+    q: "How do I add a new MCP tool to mesa-mcp?"
+    answer: >
+      Add a module to the right tools package (irods/tools, ols/tools, datacite/tools or
+      ducklake/tools); each package imports every module in its directory. Define a Pydantic input
+      model, write an async handler that returns a dict, and decorate it with
+      @register_tool(name, description, input_model=...). Handlers that need the caller declare an
+      auth_value keyword, check paths with assert_allowed and raise ToolError for failures. Add a
+      test that calls MesaServer.call. A separate package can add tools through the mesa_mcp.tools
+      entry-point group.
+    must_find:
+      - ['@register_tool']
+      - ['input_model']
+      - ['assert_allowed']
+      - ['mesa_mcp\.tools']
+    where: docs/dev/adding-tools.md
+
+  - id: run-the-tests
+    kind: engineering
+    q: "How do I run mesa-mcp's tests, and what does CI check?"
+    answer: >
+      Install with pip install -e ".[dev]", then run pytest -q and ruff check src/ tests/ (mypy is
+      advisory). The suite is hermetic: no iRODS server or OLS network access. The DuckLake config
+      tests skip unless the ducklake extra is installed; CI's ducklake-integration job installs
+      mesa-ducklake and fails if they skip, and a separate job runs the MCP 2026-07-28 conformance
+      tests.
+    must_find:
+      - ['pytest -q']
+      - ['ruff check']
+      - ['skip']
+      - ['conformance']
+    where: docs/dev/testing.md
+
+  - id: config-and-credentials
+    kind: engineering
+    q: "How does mesa-mcp get its configuration and iRODS credentials?"
+    answer: >
+      Settings merge with precedence CLI flag > MESA_MCP_<SECTION>__<FIELD> environment variable >
+      YAML file (--config) > built-in default. For stdio, credentials come from MESA_MCP_* variables
+      or the config's irods.user/irods.password, else from ~/.irods/irods_environment.json plus
+      .irodsA (written by iinit), else the anonymous user, which is read-only. The HTTP transport
+      takes a CyVerse Keycloak bearer token instead.
+    must_find:
+      - ['MESA_MCP_']
+      - ['irods_environment\.json']
+      - ['anonymous']
+      - ['precedence']
+    where: docs/user/configuration.md
+
+  - id: find-files-by-avu
+    kind: data
+    q: "How can I find every file or folder in the CyVerse Data Store that carries a given AVU?"
+    answer: >
+      Use ds_search_files_by_avu with an attribute and value (exact match; returns data objects and
+      collections), or ds_search_metadata with any combination of attribute, value and unit plus a
+      target filter (data_object, collection or both). Both drop results outside the caller's
+      accessible paths. Searching for mesa.enabled=true finds MESA-enabled projects.
+    must_find:
+      - ['ds_search_files_by_avu']
+      - ['ds_search_metadata']
+      - ['accessible paths']
+      - ['mesa\.enabled']
+    where: docs/user/examples.md
+
+  - id: avu-history-time-travel
+    kind: data
+    q: "How do I see the history of an AVU on a file, or the AVUs it had on a past date?"
+    answer: >
+      In a MESA-enabled project, mesa_ducklake_history returns the change log for a path, newest
+      first; each row has op (add or delete), actor, ts, source, via_ticket and snapshot_id, with
+      optional attribute and unit filters and a limit of 100 (capped at 1000).
+      mesa_ducklake_time_travel takes an ISO-8601 as_of timestamp and returns the AVUs in effect
+      then, including changes stamped exactly at as_of; snapshot ids are not supported. Both need
+      the ducklake catalog configured.
+    must_find:
+      - ['mesa_ducklake_history']
+      - ['mesa_ducklake_time_travel']
+      - ['as_of']
+      - ['snapshot ids are not supported']
+    where: docs/user/examples.md
+
+  - id: ontology-term-to-avu
+    kind: data
+    q: "How does an ontology term from OLS become an AVU, and what goes in the unit field?"
+    answer: >
+      The AVU attribute is the lowercased ontology id plus the snake_case term label (for example
+      envo.biome), the value is free text the user supplies, and the unit is the term's CURIE (for
+      example ENVO:00000428); the IRI is not stored. This is the shape esiil-portal writes.
+      mesa_avu_from_term computes the triple without writing; mesa_avu_apply_term writes it and
+      mirrors it to the history, and if no iri or curie is given it asks the user to pick from OLS
+      search results.
+    must_find:
+      - ['CURIE']
+      - ['snake_case']
+      - ['mesa_avu_apply_term']
+      - ['envo\.biome']
+    where: docs/user/examples.md
+
+  - id: datacite-export
+    kind: data
+    q: "How do I turn the metadata on a dataset into DataCite XML for a DOI request?"
+    answer: >
+      DataCite fields are stored as AVUs named datacite.<field> or datacite.<entity>.<n>.<field>
+      (mesa_avu_apply_datacite writes a validated record and mirrors it as one snapshot).
+      mesa_datacite_export does not read iRODS: list the path's AVUs with ds_list_avus or
+      ds_get_metadata, pass the datacite.* AVUs to it, and choose format xml (DataCite kernel 4) or
+      json. mesa_datacite_validate reports missing mandatory fields and doi_ready.
+    must_find:
+      - ['mesa_datacite_export']
+      - ['ds_list_avus', 'ds_get_metadata']
+      - ['doi_ready']
+      - ['kernel.4', 'xml']
+    where: docs/user/datacite.md
+
+  - id: tickets-and-provenance
+    kind: data
+    q: "How do iRODS tickets work through mesa-mcp, and are changes made with a ticket traceable?"
+    answer: >
+      ds_create_ticket mints a read or write ticket with optional limits; ds_modify_ticket,
+      ds_delete_ticket, ds_list_tickets and ds_get_ticket_info manage it. ds_use_ticket binds a
+      ticket to the caller's own pooled iRODS session, and later AVU writes from that session
+      record the ticket id in the history's via_ticket column. Anonymous users cannot use these
+      tools. Creating or modifying a ticket is not itself recorded in the history.
+    must_find:
+      - ['ds_use_ticket']
+      - ['via_ticket']
+      - ['ds_create_ticket']
+      - ['anonymous']
+    where: docs/user/examples.md

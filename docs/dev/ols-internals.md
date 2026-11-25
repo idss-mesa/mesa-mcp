@@ -1,3 +1,27 @@
+---
+type: Reference
+title: OLS internals
+description: The OLSClient wrapper (OLS4 endpoints, retries, seven TTL caches and the config that sets them), the frozen AVU contract shared with esiil-portal (attribute <ontology>.<snake_label>, unit = CURIE), round-trip invariants, and the error surface.
+tags:
+- ols
+- ontology
+- avu
+generated:
+  by: claude/opus-5.5
+  at: '2026-11-24T00:00:00Z'
+sources:
+- id: client
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/ols/client.py
+  title: OLSClient
+  author: team:idss-mesa
+- id: transform
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/ols/transform.py
+  title: AVU transforms
+  author: team:idss-mesa
+status: stable
+stale_after: '2027-05-24T00:00:00Z'
+---
+
 # OLS internals
 
 What this page covers: the `OLSClient` HTTP wrapper, its seven-cache
@@ -7,14 +31,14 @@ layout, and the AVU shape contract that mesa-mcp shares with
 
 ## Origin
 
-[`src/mesa_mcp/ols/client.py`](../../src/mesa_mcp/ols/client.py) is a
+[`src/mesa_mcp/ols/client.py`](https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/ols/client.py) is a
 verbatim port (minus Django `cache` calls) of
 `esiil-portal/portal/services/ols_client.py`. Public method signatures
 and return shapes are preserved — parity work is mechanical. If you
 need to extend the API surface, prefer adding a new method over
 changing an existing one.
 
-[`src/mesa_mcp/ols/transform.py`](../../src/mesa_mcp/ols/transform.py)
+[`src/mesa_mcp/ols/transform.py`](https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/ols/transform.py)
 is a pure-Python port with no behavioural changes from
 `esiil-portal/portal/services/ols_transform.py`. Reserved attribute
 prefixes (`datacite`, `dc`, `eml`, `ipc-`, `irods::`, `ipc_`) are
@@ -43,28 +67,23 @@ layer on top.
 ## Cache layout
 
 `OLSClient` ships seven distinct `cachetools.TTLCache` instances. Each
-has `maxsize=4096`. The TTL choices are the portal's, preserved so
-behaviour matches:
+has `maxsize=4096`. The constructor defaults are the portal's TTLs;
+`get_ols_client()` passes the `ols.*` config values in, so a running
+server uses the config column:
 
-| Cache field           | Used for                          | TTL    |
-| --------------------- | --------------------------------- | ------ |
-| `_cache_catalog`      | full ontology catalog listings    | 24 h   |
-| `_cache_ontology`     | per-ontology metadata             | 24 h   |
-| `_cache_search`       | free-text searches                | 1 h    |
-| `_cache_term`         | per-term records                  | 24 h   |
-| `_cache_children`     | child listings of a term          | 12 h   |
-| `_cache_desc_search`  | descendants-of searches           | 1 h    |
-| `_cache_template`     | generated template documents      | 24 h   |
+| Cache field           | Used for                          | Constructor default | With config (`get_ols_client`) |
+| --------------------- | --------------------------------- | ------------------- | ------------------------------ |
+| `_cache_catalog`      | full ontology catalog listings    | 24 h                | `ontology_cache_ttl` (3600 s)  |
+| `_cache_ontology`     | per-ontology metadata             | 24 h                | `ontology_cache_ttl` (3600 s)  |
+| `_cache_search`       | free-text searches                | 1 h                 | `search_cache_ttl` (60 s)      |
+| `_cache_term`         | per-term records                  | 24 h                | `term_cache_ttl` (600 s)       |
+| `_cache_children`     | child listings of a term          | 12 h                | 12 h (fixed)                   |
+| `_cache_desc_search`  | descendants-of searches           | 1 h                 | `search_cache_ttl` (60 s)      |
+| `_cache_template`     | generated template documents      | 24 h                | 24 h (fixed)                   |
 
-Cache keys are SHA-256 hex digests of the request signature so the
-keyspace is stable across processes and free of secret material.
-
-The `OLSConfig` fields (`ontology_cache_ttl`, `term_cache_ttl`,
-`search_cache_ttl`) in `mesa_mcp.config` are honoured by the loader,
-but the `OLSClient` constructor does **not** read them — it uses the
-hard-coded portal values above. This is a known gap; wiring the
-config-driven TTLs through is an open task. Until it lands, edits to
-the config fields have no effect on cache behaviour.
+`request_timeout` (default 30 s) and `base_url` are passed in the same
+way. Earlier releases ignored the config fields; that was fixed, and
+`tests/test_config_integrity.py` guards it.
 
 ## The AVU contract
 
@@ -75,7 +94,7 @@ match. It is **frozen**.
 {
     "attribute": f"{ontology_id}.{snake_case(label)}",  # e.g. "envo.biome"
     "value":     <user-supplied value or term label>,
-    "unit":      <term CURIE>,                          # e.g. "ENVO:01000228"
+    "unit":      <term CURIE>,                          # e.g. "ENVO:00000428"
 }
 ```
 
@@ -91,7 +110,7 @@ Three things to internalise:
    stays in metadata fields outside the AVU triple (e.g. the term
    record returned by `mesa_ols_get_term`).
 
-The snake-case helper lives in `OLSClient._label_to_snake` and is the
+The snake-case helper is `_label_to_snake` in `ols/client.py`, the
 function `mesa_avu_from_term` re-uses, so labels are converted
 identically to how the portal does it. Do not roll your own.
 
@@ -115,18 +134,18 @@ Round-trip with `esiil-portal/portal/services/ols_transform.py`:
 
 When you author a tool that writes AVUs, add a unit test exercising
 the round-trip. The `mcp-reviewer` agent in
-[`.claude/agents/mcp-reviewer.md`](../../.claude/agents/mcp-reviewer.md)
+[`.claude/agents/mcp-reviewer.md`](https://github.com/idss-mesa/mesa-mcp/blob/main/.claude/agents/mcp-reviewer.md)
 checks for this.
 
 ## Authoring `mesa_ols_*` and `mesa_avu_*` tools
 
 The auto-discovery loop in
-[`src/mesa_mcp/ols/tools/__init__.py`](../../src/mesa_mcp/ols/tools/__init__.py)
+[`src/mesa_mcp/ols/tools/__init__.py`](https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/ols/tools/__init__.py)
 imports every non-underscore module in the directory, which is what
 fires the `@register_tool` decorators. Drop a `.py` file in there and
 the tool is registered on next `import mesa_mcp.ols`.
 
-The currently registered tools are:
+The tools in that directory are:
 
 - `mesa_ols_list_ontologies`
 - `mesa_ols_get_ontology`
@@ -135,12 +154,11 @@ The currently registered tools are:
 - `mesa_ols_get_term_hierarchy`
 - `mesa_ols_generate_template`
 - `mesa_avu_from_term` (pure transform — no iRODS write)
-
-`mesa_avu_apply_term` (composite: pick term + path + value → write AVU
-+ DuckLake record) is **planned**. It waits on iRODS auth and
-`ds_add_avu`. See `CLAUDE.md` and
-[`.claude/agents/ols-tool-author.md`](../../.claude/agents/ols-tool-author.md)
-for the spec.
+- `mesa_avu_apply_term` (composite: resolve the term, write the AVU
+  through the same helper as `ds_add_avu`, mirror it to the AVU history;
+  asks the user to choose a term when none is given)
+- `mesa_policy_enable` / `mesa_policy_disable` (not ontology tools; they
+  live here for historical reasons not recorded in the code)
 
 ## Singleton client access
 
@@ -166,6 +184,6 @@ avu_from_term` resolving a term), raise
 - [Architecture](./architecture.md)
 - [Adding tools](./adding-tools.md)
 - [Tools reference](../user/tools-reference.md)
-- [`.claude/agents/ols-tool-author.md`](../../.claude/agents/ols-tool-author.md)
-- [`src/mesa_mcp/ols/client.py`](../../src/mesa_mcp/ols/client.py)
-- [`src/mesa_mcp/ols/transform.py`](../../src/mesa_mcp/ols/transform.py)
+- [`.claude/agents/ols-tool-author.md`](https://github.com/idss-mesa/mesa-mcp/blob/main/.claude/agents/ols-tool-author.md)
+- [`src/mesa_mcp/ols/client.py`](https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/ols/client.py)
+- [`src/mesa_mcp/ols/transform.py`](https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/ols/transform.py)

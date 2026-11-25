@@ -1,3 +1,27 @@
+---
+type: Guide
+title: Local install (Mode B)
+description: Install mesa-mcp in a virtualenv on Linux or macOS, supply iRODS credentials through environment variables, ~/.irods autodetection or YAML, smoke-test it with the MCP Inspector, and add the optional Croissant plugin.
+tags:
+- install
+- stdio
+- credentials
+generated:
+  by: claude/opus-5.5
+  at: '2026-11-24T00:00:00Z'
+sources:
+- id: irods-env
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/auth/irods_env.py
+  title: ~/.irods loader
+  author: team:idss-mesa
+- id: pyproject
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/pyproject.toml
+  title: Dependencies and extras
+  author: team:idss-mesa
+status: stable
+stale_after: '2027-05-24T00:00:00Z'
+---
+
 # Local install (Mode B)
 
 What this page covers: installing mesa-mcp on your own workstation
@@ -37,13 +61,13 @@ dedicated virtualenv:
 
 ```bash
 python3 -m venv ~/.venvs/mesa-mcp
-~/.venvs/mesa-mcp/bin/pip install git+https://github.com/cyverse/mesa-mcp.git
+~/.venvs/mesa-mcp/bin/pip install git+https://github.com/idss-mesa/mesa-mcp.git
 ```
 
 If you prefer pipx-style isolation:
 
 ```bash
-pipx install git+https://github.com/cyverse/mesa-mcp.git
+pipx install git+https://github.com/idss-mesa/mesa-mcp.git
 # `mesa-mcp` will be on $PATH but lives in its own venv under ~/.local/pipx/venvs/.
 ```
 
@@ -117,7 +141,8 @@ stdio transport reads:
 
 Resolution chain (highest precedence first):
 
-1. Explicit `MESA_MCP_IRODS_*` env vars from Option 1.
+1. Explicit credentials: the env vars from Option 1, or `irods.user` /
+   `irods.password` from the YAML file in Option 3.
 2. `~/.irods/irods_environment.json` + `.irodsA` autodetection (this option).
 3. Anonymous read-only access to the zone's public shared collection.
 
@@ -202,13 +227,17 @@ credentials in the `env` block.
 ## What works / what doesn't in local mode
 
 - **Works.** The full `ds_*` iRODS surface (read, write, AVU, ACL, ticket
-  lifecycle, rule execution, policy introspection), the seven `mesa_ols_*`
-  tools, and `mesa_avu_from_term`.
-- **Works with a caveat.** `mesa_avu_apply_term` writes the AVU to iRODS
-  successfully, but the DuckLake mirror step short-circuits silently
-  unless you have set `MESA_MCP_DUCKLAKE__CATALOG_DSN` to a reachable
-  Postgres catalog. Most local users skip that — see
-  [mesa-ducklake's docs](https://github.com/cyverse/mesa-ducklake/tree/main/docs).
+  lifecycle, rule execution, policy introspection), the six `mesa_ols_*`
+  tools, `mesa_avu_from_term`, and the DataCite tools.
+- **Works with a caveat.** The AVU write tools (`ds_add_avu`,
+  `mesa_avu_apply_term`, `mesa_avu_apply_datacite`, …) write to iRODS,
+  but the AVU-history mirror is skipped silently unless the `ducklake`
+  extra is installed and `MESA_MCP_DUCKLAKE__CATALOG_DSN` is set. For a
+  single local process, a DuckDB file works:
+  `MESA_MCP_DUCKLAKE__CATALOG_DSN=duckdb:///home/alice/.mesa/catalog.duckdb`.
+  The `mesa_ducklake_*` tools fail with `ducklake_disabled` until then.
+  See [Configuration](./configuration.md#ducklake-avu-history-catalog)
+  and [mesa-ducklake's docs](https://github.com/idss-mesa/mesa-ducklake/tree/main/docs).
 - **Best-effort.** `ds_list_rules`, `ds_get_rule_definition`,
   `ds_list_policies`, and `ds_get_policy_config` return documented stub
   envelopes because python-irodsclient does not expose the underlying
@@ -229,7 +258,8 @@ credentials in the `env` block.
   venv-installed `mesa-mcp` binary, not the bare name.
 - **`OLS request failed`.** Either network egress to
   `https://www.ebi.ac.uk/` is blocked, or OLS is having a bad afternoon.
-  All `mesa_ols_*` tools retry with cached values where possible; check
+  The OLS client retries 429/502/503/504 responses twice and serves
+  cached results where it has them; check
   `MESA_MCP_OLS__BASE_URL` if you are forced through a proxy.
 - **Where to look in logs.** mesa-mcp's stderr goes wherever the MCP
   client routes it. Claude Desktop on macOS writes to
@@ -245,4 +275,4 @@ credentials in the `env` block.
 - [MCP client wiring](./claude-desktop.md)
 - [Configuration](./configuration.md)
 - [Tools reference](./tools-reference.md)
-- [Examples](./examples.md)
+- [Metadata workflows](./examples.md)

@@ -1,3 +1,26 @@
+---
+type: Guide
+title: systemd
+description: A hardened systemd unit for running mesa-mcp's HTTP transport as a service, the install steps, what each directive does, the /healthz check, and log rotation.
+tags:
+- deploy
+- systemd
+generated:
+  by: claude/opus-5.5
+  at: '2026-11-24T00:00:00Z'
+sources:
+- id: unit
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/deploy/mesa-mcp.service
+  title: Shipped systemd unit
+  author: team:idss-mesa
+- id: installer
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/deploy/install-systemd.sh
+  title: systemd installer
+  author: team:idss-mesa
+status: stable
+stale_after: '2027-02-24T00:00:00Z'
+---
+
 # systemd
 
 What this page covers: how to run mesa-mcp as a systemd service on the
@@ -8,26 +31,28 @@ after the working
 the iRODS-MCP-friendly bits cribbed from
 `/home/exouser/irods-mcp-server/install/irods-mcp-server.service`.
 
-Stdio-mode mesa-mcp is typically *launched by the MCP client itself*
-(Claude Desktop, Claude Code) and does not need a long-running daemon.
-A systemd unit is still useful as:
-
-- A convenience supervisor when running under a local Inspector or
-  test harness for hours at a time.
-- A starting point for the SSE-mode daemon (planned) — same unit,
-  different `--transport`.
+The unit runs the HTTP transport (`--transport sse`), which serves both
+the old-style SSE endpoint and Streamable HTTP; see
+[HTTP / SSE transport](./http-sse.md). Stdio-mode mesa-mcp is launched by
+the MCP client itself and does not need a daemon.
 
 ## Unit file
 
-Save this as `/etc/systemd/system/mesa-mcp.service`. Note the
-`ExecStart` runs the SSE transport, which is **not implemented** today
-— for stdio you would not normally need this unit at all. Adjust as
-the project evolves.
+The repository ships a unit at
+[`deploy/mesa-mcp.service`](https://github.com/idss-mesa/mesa-mcp/blob/main/deploy/mesa-mcp.service)
+and an idempotent installer,
+[`deploy/install-systemd.sh`](https://github.com/idss-mesa/mesa-mcp/blob/main/deploy/install-systemd.sh)
+(see [`deploy/README.md`](https://github.com/idss-mesa/mesa-mcp/blob/main/deploy/README.md)).
+The listing below is an annotated variant of it. They differ in details:
+the shipped file reads `--config /etc/mesa-mcp/config.yaml` and
+`EnvironmentFile=-/etc/mesa-mcp/mesa-mcp.env`, and uses longer start and
+restart delays. When they disagree, the shipped file is what the
+installer puts in place.
 
 ```ini
 [Unit]
 Description=mesa-mcp MCP server
-Documentation=https://github.com/cyverse/mesa-mcp
+Documentation=https://github.com/idss-mesa/mesa-mcp
 After=network-online.target nss-lookup.target postgresql.service
 Wants=network-online.target
 
@@ -81,13 +106,10 @@ WantedBy=multi-user.target
 ## Install steps
 
 ```bash
-# 1. Place the unit file.
+# 1. Place the unit file (or run deploy/install-systemd.sh, which does this).
 sudo install -m 0644 \
-    /home/exouser/mesa-mcp/install/mesa-mcp.service \
+    /home/exouser/mesa-mcp/deploy/mesa-mcp.service \
     /etc/systemd/system/mesa-mcp.service
-
-# (If you didn't check the file into the repo yet, write it directly
-#  with: sudo nano /etc/systemd/system/mesa-mcp.service)
 
 # 2. Create the secret env file (root-owned, mode 0600).
 sudo mkdir -p /etc/mesa-mcp
@@ -134,10 +156,15 @@ MCP client itself launch mesa-mcp.
 
 ## Health check
 
-The service has no `ExecStartPost` health probe yet — once an HTTP
-`/healthz` endpoint is wired (planned with SSE), drop in a
-`curl --silent --fail http://127.0.0.1:8080/healthz` and supervise.
-For now, `journalctl -u mesa-mcp -n 20` is the simplest live-check.
+The HTTP transport serves an unauthenticated `GET /healthz` that returns
+`{"status": "ok", "version": "…"}`:
+
+```bash
+curl --silent --fail http://127.0.0.1:8080/healthz
+```
+
+The unit has no `ExecStartPost` probe; add one, or poll `/healthz` from
+your monitoring. `journalctl -u mesa-mcp -n 20` shows recent output.
 
 ## Stop / restart
 
@@ -165,6 +192,5 @@ up `logrotate(8)` — see [Monitoring](./monitoring.md).
 - [Overview](./overview.md)
 - [HTTP / SSE transport](./http-sse.md)
 - [Monitoring](./monitoring.md)
-- [`/home/exouser/esiil-portal/esiil-portal.service`](../../README.md) —
-  the reference systemd unit on this VM (cross-VM, you can find it in
-  the esiil-portal repo).
+- `esiil-portal.service` in the esiil-portal repository, the reference
+  unit this one was patterned on.
