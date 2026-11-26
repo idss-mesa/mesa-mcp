@@ -1,3 +1,23 @@
+---
+type: Guide
+title: VICE app install (Mode C)
+description: Install and run mesa-mcp inside a CyVerse Discovery Environment VICE app (JupyterLab, RStudio Server, Cloud Shell), reusing the iRODS credentials the pod already has, and wire it into in-pod Claude Code.
+tags:
+- install
+- vice
+- cyverse
+generated:
+  by: claude/opus-5.5
+  at: '2026-11-24T00:00:00Z'
+sources:
+- id: irods-env
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/auth/irods_env.py
+  title: ~/.irods loader
+  author: team:idss-mesa
+status: stable
+stale_after: '2027-05-24T00:00:00Z'
+---
+
 # VICE app install (Mode C)
 
 What this page covers: installing mesa-mcp inside a CyVerse Discovery
@@ -54,7 +74,7 @@ and launches the server.
 
 ```bash
 python3 -m venv ~/.venvs/mesa-mcp
-~/.venvs/mesa-mcp/bin/pip install git+https://github.com/cyverse/mesa-mcp.git
+~/.venvs/mesa-mcp/bin/pip install git+https://github.com/idss-mesa/mesa-mcp.git
 
 # Pull iRODS settings out of the env file the VICE launcher dropped in.
 IRODS_ENV=~/.irods/irods_environment.json
@@ -122,7 +142,8 @@ Inside the pod your iRODS identity is whatever
   collections. Whatever iRODS ACLs grant you (own / write / read).
 
 `assert_allowed` is a soft gate — it confirms the path falls within the
-caller's accessible-path set (home + shared + any ticket-granted paths).
+caller's accessible-path set (home + shared; a bound ticket does not
+add paths).
 The hard enforcement happens inside iRODS itself: ACLs reject ops on
 shared subpaths where you do not have `write` / `own`, regardless of
 what `assert_allowed` allowed. This is the correct layering — see
@@ -181,9 +202,9 @@ See [`../deploy/overview.md`](../deploy/overview.md) and
   launch.
 - **DuckLake history is off by default in this mode.** There is no
   Postgres in the pod, so `MESA_MCP_DUCKLAKE__CATALOG_DSN` stays empty
-  and `mesa_avu_apply_term` short-circuits the mirror step silently. To
-  enable history, point that DSN at a remote Postgres catalog you
-  control — see [mesa-ducklake's docs](https://github.com/cyverse/mesa-ducklake/tree/main/docs).
+  and the AVU write tools skip the history mirror silently. To enable
+  history, install the `ducklake` extra and point that DSN at a Postgres
+  catalog you control, or at a `duckdb:///` file for a single process — see [mesa-ducklake's docs](https://github.com/idss-mesa/mesa-ducklake/tree/main/docs).
 - **Egress matters.** The OLS tools talk to
   `https://www.ebi.ac.uk/ols4/api`. This works as long as the VICE pod's
   network policy allows outbound HTTPS to `www.ebi.ac.uk` — which is the

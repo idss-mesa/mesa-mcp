@@ -33,7 +33,10 @@ situation:
 
 ## Documentation
 
-Full docs live under [`docs/`](./docs/README.md), split by audience:
+The documentation is published at **https://idss-mesa.github.io/mesa-mcp/**
+(with [`llms.txt`](https://idss-mesa.github.io/mesa-mcp/llms.txt) for AI
+agents). Coding agents should start with [`AGENTS.md`](./AGENTS.md). The
+source lives under [`docs/`](./docs/README.md), split by audience:
 
 - **Users** — [getting started](./docs/user/getting-started.md),
   [configuration](./docs/user/configuration.md),
@@ -56,10 +59,10 @@ Full docs live under [`docs/`](./docs/README.md), split by audience:
 
 ## Status
 
-Pre-alpha. Today the server registers a single liveness tool, `ds_ping`,
-which echoes a message and the running version. The full `ds_*`, `mesa_ols_*`,
-and `mesa_ducklake_*` tool surfaces land in subsequent PRs — see `CLAUDE.md`
-for the plan.
+Pre-alpha (version 0.2.0). The server registers 52 built-in tools: the
+`ds_*` iRODS surface, `mesa_ols_*` / `mesa_avu_*` ontology tools, DataCite
+tools, `mesa_ducklake_*` history tools and `mesa_policy_*`. See the
+[tools reference](./docs/user/tools-reference.md).
 
 ## Quick start
 
@@ -93,9 +96,12 @@ src/mesa_mcp/      Python package
   config.py        Pydantic config + loader
   errors.py        Structured ToolError
   logging.py       structlog setup
-  irods/           Stubs for iRODS tools, client pool, access checks
-  ols/             Stubs for OLS client, transform, and ontology tools
-  ducklake/        Stubs for mesa-ducklake facade
+  auth/            Credential resolution, AuthValue, Keycloak claims
+  transport/       HTTP (SSE + Streamable HTTP), OIDC, /healthz
+  irods/           ds_* tools, client pool, access checks
+  ols/             OLS client, AVU transforms, ontology tools
+  datacite/        DataCite schema, transform, export, tools
+  ducklake/        mesa-ducklake facade and mesa_ducklake_* tools
 tests/             pytest suite (asyncio mode)
 config.yaml.example
 .env.example

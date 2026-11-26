@@ -1,3 +1,28 @@
+---
+type: Reference
+title: HTTP / SSE transport
+description: 'The HTTP transport started with --transport sse: its routes (/sse, /messages/, /mcp, /healthz, RFC 9728 metadata), the bearer-token auth model, bind addresses, and an operator checklist.'
+tags:
+- deploy
+- http
+- sse
+- streamable-http
+generated:
+  by: claude/opus-5.5
+  at: '2026-11-24T00:00:00Z'
+sources:
+- id: sse
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/transport/sse.py
+  title: HTTP app and auth middleware
+  author: team:idss-mesa
+- id: oidc
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/transport/oidc.py
+  title: OIDC token verification
+  author: team:idss-mesa
+status: stable
+stale_after: '2027-02-24T00:00:00Z'
+---
+
 # HTTP / SSE transport
 
 What this page covers: the HTTP/SSE transport mesa-mcp serves when run
@@ -23,7 +48,7 @@ machine. SSE matters when:
 ## Routes
 
 The Starlette app assembled by
-[`src/mesa_mcp/transport/sse.py::build_sse_app`](../../src/mesa_mcp/transport/sse.py)
+[`src/mesa_mcp/transport/sse.py::build_sse_app`](https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/transport/sse.py)
 exposes five routes across two MCP transports plus health/metadata:
 
 | Method | Path | Auth | Purpose |
@@ -63,10 +88,10 @@ all best done in nginx.
 
 Every non-public request must carry `Authorization: Bearer <JWT>`. The
 JWT is verified by
-[`src/mesa_mcp/transport/oidc.py::OIDCAuthenticator`](../../src/mesa_mcp/transport/oidc.py)
+[`src/mesa_mcp/transport/oidc.py::OIDCAuthenticator`](https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/transport/oidc.py)
 against the CyVerse Keycloak realm's JWKS, with `iss`, `exp`, and
 (optionally) `aud` checks. A valid token yields an
-[`AuthValue`](../../src/mesa_mcp/auth/models.py) bound to the
+[`AuthValue`](https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/auth/models.py) bound to the
 request-scoped contextvar; every `ds_*` tool reads it from there.
 
 Two practical token shapes:
@@ -122,8 +147,12 @@ To enable SSE on a fresh host:
 2. Set `MESA_MCP_SERVER__PUBLIC_BASE_URL` to the canonical HTTPS URL.
 3. Set `MESA_MCP_SERVER__OIDC_DISCOVERY_URL` to the realm's discovery
    URL (e.g. `https://kc.cyverse.org/auth/realms/CyVerse/.well-known/openid-configuration`).
-4. Optionally set `MESA_MCP_SERVER__OIDC_AUDIENCE` to lock tokens to a
-   specific `aud` claim.
+4. Tokens must carry an `aud` claim that matches this resource:
+   `server.oidc_require_audience` defaults to `true`, and the expected
+   audience is `MESA_MCP_SERVER__OIDC_AUDIENCE` or, when that is unset,
+   `public_base_url`. With OIDC enabled, the transport refuses to start if neither
+   resolves. Setting `oidc_require_audience` to `false` disables the
+   check and logs a warning on every request.
 5. Provision the Keycloak client(s). No client secret is needed —
    mesa-mcp validates inbound JWTs and never runs the
    authorization-code flow. See [OIDC](./oidc.md).
@@ -140,4 +169,4 @@ To enable SSE on a fresh host:
 - [Overview](./overview.md) — full deploy topology.
 - [`../user/configuration.md`](../user/configuration.md) — config field
   reference, including `public_base_url`.
-- [`../../CLAUDE.md`](../../CLAUDE.md) — Authentication section.
+- [`../../CLAUDE.md`](https://github.com/idss-mesa/mesa-mcp/blob/main/CLAUDE.md) — Authentication section.

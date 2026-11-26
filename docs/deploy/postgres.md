@@ -1,18 +1,42 @@
+---
+type: Guide
+title: Postgres
+description: 'Provision a Postgres database for the mesa-ducklake catalog behind mesa-mcp''s AVU history: role and database, migrations, the catalog_dsn, backups, and the DuckDB-file alternative.'
+tags:
+- deploy
+- postgres
+- mesa-ducklake
+generated:
+  by: claude/opus-5.5
+  at: '2026-11-24T00:00:00Z'
+sources:
+- id: facade
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/ducklake/client.py
+  title: DuckLake facade
+  author: team:idss-mesa
+- id: ducklake-postgres
+  resource: https://github.com/idss-mesa/mesa-ducklake/blob/main/docs/deploy/postgres.md
+  title: mesa-ducklake Postgres deployment
+  author: team:idss-mesa
+status: stable
+stale_after: '2027-02-24T00:00:00Z'
+---
+
 # Postgres
 
 What this page covers: provisioning a local Postgres instance to host
-the `mesa_ducklake` catalog database that the sibling project
-[`cyverse/mesa-ducklake`](https://github.com/cyverse/mesa-ducklake)
-needs. mesa-mcp does not own the schema — it only connects through the
-DuckLake facade. The DuckLake integration in mesa-mcp itself is
-**planned**; today the `DuckLakeClient` in
-[`src/mesa_mcp/ducklake/client.py`](../../src/mesa_mcp/ducklake/client.py)
-is a stub that raises `NotImplementedError`. This page describes how
-to have Postgres ready for when the implementation lands.
+the `mesa_ducklake` catalog database for the sibling library
+[`idss-mesa/mesa-ducklake`](https://github.com/idss-mesa/mesa-ducklake),
+which records the AVU history. mesa-mcp does not own the schema: it
+imports mesa-ducklake in-process through the facade in
+[`src/mesa_mcp/ducklake/client.py`](https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/ducklake/client.py)
+and hands it the DSN (see [DuckLake integration](../dev/ducklake-integration.md)).
 
-For mesa-ducklake's own deployment specifics, cross-reference its
-`docs/deploy/postgres.md` (in the sibling repo) once that file
-exists.
+Postgres is the catalog for hosted, multi-writer deployments. A single
+local process can use a DuckDB file instead
+(`duckdb:///abs/path/catalog.duckdb`), with no server to run. mesa-ducklake's
+[`docs/deploy/postgres.md`](https://github.com/idss-mesa/mesa-ducklake/blob/main/docs/deploy/postgres.md)
+is the source of truth for schema-level setup.
 
 ## What mesa-ducklake needs
 
@@ -55,9 +79,15 @@ Verify:
 sudo -u postgres psql -d mesa_ducklake -c '\dn'
 ```
 
-You should see at least the default `public` schema. The DuckLake
-schema migrations are owned by mesa-ducklake; run them per its docs
-when that repo lands.
+You should see at least the default `public` schema. The catalog schema
+belongs to mesa-ducklake. Apply its migrations with its CLI, which is
+idempotent:
+
+```bash
+MESA_DUCKLAKE_DSN=postgresql://mesa:…@127.0.0.1:5432/mesa_ducklake mesa-ducklake migrate
+```
+
+Do not run it against the iCAT database.
 
 ## DSN for `mesa-mcp` config
 
@@ -85,23 +115,18 @@ to do so is a deployment choice.
 
 ## Leaving DuckLake disabled
 
-If you set `catalog_dsn` to an empty string (the default), mesa-mcp's
-AVU-write tools still succeed — they just **don't** mirror to
-DuckLake. This is the recommended setting until mesa-ducklake is
-ready.
+If `catalog_dsn` is unset or empty (the default), or the `ducklake`
+extra is not installed, mesa-mcp's AVU-write tools still succeed; they
+just do not mirror to the history, and the `mesa_ducklake_*` tools fail
+with `ducklake_disabled`.
 
 ## Backups
 
-The catalog rows are small and important. The recommended pattern,
-cribbed from the esiil-portal deployment on the same VM:
-
-- A `pg_dump --format=custom mesa_ducklake` cron / systemd timer.
-- Rotate dumps to `/media/volume/portal_db/backups/` (or wherever the
-  VM has spare disk).
-- Test the restore yearly.
-
-A starter `mesa-mcp-pg-backup.timer` + `.service` pair will live in
-the repo's `install/` directory once the DuckLake integration lands.
+The catalog rows are small and important. mesa-ducklake ships the backup
+pipeline: `deploy/backup-pg.sh` with a `mesa-ducklake-backup.service` and
+`.timer` pair that runs a daily `pg_dump` and pushes it into iRODS. See
+its [`docs/deploy/backup.md`](https://github.com/idss-mesa/mesa-ducklake/blob/main/docs/deploy/backup.md).
+After a restore, run `mesa-ducklake migrate` to apply any newer schema.
 
 ## Why Postgres specifically
 
@@ -120,9 +145,9 @@ adding the `mesa_ducklake` database to the same cluster is fine.
 - [Overview](./overview.md)
 - [`../user/configuration.md`](../user/configuration.md) for the
   `ducklake.catalog_dsn` field.
-- [`../../CLAUDE.md`](../../CLAUDE.md) — DuckLake integration section.
-- [`src/mesa_mcp/ducklake/client.py`](../../src/mesa_mcp/ducklake/client.py)
-  — the stub facade today.
-- [cyverse/mesa-ducklake](https://github.com/cyverse/mesa-ducklake) —
-  sibling repo. Once it ships, its `docs/deploy/postgres.md` is the
-  source of truth for schema-level setup.
+- [`../../CLAUDE.md`](https://github.com/idss-mesa/mesa-mcp/blob/main/CLAUDE.md) — DuckLake integration section.
+- [DuckLake integration](../dev/ducklake-integration.md) — how mesa-mcp
+  uses the catalog.
+- [idss-mesa/mesa-ducklake](https://github.com/idss-mesa/mesa-ducklake) —
+  the library; its `docs/deploy/` covers Postgres, the DuckDB and Quack
+  catalogs, backups and iRODS rules.

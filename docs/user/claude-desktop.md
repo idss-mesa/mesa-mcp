@@ -1,3 +1,24 @@
+---
+type: Integration Guide
+title: MCP client wiring
+description: JSON and CLI snippets for registering a local stdio mesa-mcp with Claude Desktop, Claude Code, Cline, Continue and the MCP Inspector, including an anonymous-only setup.
+tags:
+- clients
+- claude-desktop
+- claude-code
+- stdio
+generated:
+  by: claude/opus-5.5
+  at: '2026-11-24T00:00:00Z'
+sources:
+- id: main
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/__main__.py
+  title: mesa-mcp CLI entry point
+  author: team:idss-mesa
+status: stable
+stale_after: '2027-02-24T00:00:00Z'
+---
+
 # MCP client wiring
 
 What this page covers: how to register mesa-mcp with the four MCP
@@ -192,6 +213,6 @@ auth anyway).
 - [Getting started](./getting-started.md)
 - [Configuration](./configuration.md)
 - [Tools reference](./tools-reference.md)
-- [Examples](./examples.md)
+- [Metadata workflows](./examples.md)
 - [Deployment — HTTP/SSE](../deploy/http-sse.md) for the hosted-service
   transport.

@@ -1,3 +1,23 @@
+---
+type: Guide
+title: Monitoring
+description: Where mesa-mcp's logs go and how to rotate them, what the /healthz endpoint reports, disk use, process supervision under systemd, and the absence of metrics.
+tags:
+- deploy
+- monitoring
+- logging
+generated:
+  by: claude/opus-5.5
+  at: '2026-11-24T00:00:00Z'
+sources:
+- id: healthz
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/transport/healthz.py
+  title: /healthz endpoint
+  author: team:idss-mesa
+status: stable
+stale_after: '2027-02-24T00:00:00Z'
+---
+
 # Monitoring
 
 What this page covers: where mesa-mcp's logs land, how to rotate them,
@@ -82,32 +102,32 @@ What does **not** get logged:
   sub-agent checks for accidental log statements that interpolate
   these.
 
-## Health check (planned)
+## Health check
 
-`/healthz` is not yet exposed. Once the SSE transport lands, the
-intended pattern is:
+The HTTP transport serves `GET /healthz` without authentication. It
+returns `200` with `{"status": "ok", "version": "<mesa-mcp version>"}`
+and does not touch iRODS, OLS or the catalog, so it shows that the
+process is up, not that its dependencies are reachable. Point your
+uptime monitor or load balancer at it, locally
+(`http://127.0.0.1:8080/healthz`) or through nginx
+(`https://<host>/healthz`).
 
-- `GET /healthz` returns 200 with a small JSON body
-  (`{"status": "ok", "tools": <count>, "version": "..."}`).
-- systemd: a `WatchdogSec=` directive + `sd_notify(WATCHDOG=1)` from
-  the mesa-mcp process.
-- External liveness check from the load balancer or uptime monitor.
-
-For stdio mode, there is no equivalent — the only liveness signal is
-the process being alive in `journalctl`. Today, the smoke test is
-`ds_ping` over the MCP wire (see
+There is no systemd watchdog integration. For stdio mode there is no
+endpoint; the liveness check is a `ds_ping` call over MCP (see
 [Getting started](../user/getting-started.md)).
 
 ## Disk
 
-mesa-mcp does not write to disk during normal operation (caches are
-all in-memory `cachetools.TTLCache`). Things that may use disk:
+The OLS caches are in memory. Things that use disk:
 
 - File logs (if you opt into `StandardOutput=append:...`).
-- Future DuckLake catalog (Postgres data dir under
-  `/var/lib/postgresql/` — see [Postgres](./postgres.md)).
-- Future encrypted credential store under `~/.mesa-mcp/`
-  (terrain-mcp's pattern, planned).
+- The mesa-ducklake Parquet cache, when the AVU history is enabled:
+  `ducklake.cache_dir`, or `platformdirs.user_cache_dir("mesa-ducklake")`
+  by default, trimmed to `ducklake.cache_cap_bytes` (1 GiB by default)
+  after each mirror. Under `ProtectSystem=strict`, that directory must be
+  writable by the service.
+- The Postgres catalog's data directory under `/var/lib/postgresql/`, if
+  it runs on the same VM (see [Postgres](./postgres.md)).
 
 Watch `/var/lib/postgresql/`, `/var/log/journal/`, and
 `/home/exouser/mesa-mcp/*.log` (if used). A `df -h` cron + alerting on
@@ -129,14 +149,13 @@ Crash loops: if `Restart=on-failure` + `StartLimitBurst=5` hit, the
 service refuses to start until you `systemctl reset-failed mesa-mcp`.
 Investigate the journalctl output before clearing.
 
-## Metrics (not yet)
+## Metrics
 
-mesa-mcp does not expose Prometheus metrics today. If you need
+mesa-mcp does not expose Prometheus metrics. If you need
 observability beyond logs, the cleanest place to add it is the
 `MesaServer._build_mcp_server` boundary in
-[`server.py`](../../src/mesa_mcp/server.py), instrumenting the
+[`server.py`](https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/server.py), instrumenting the
 `call_tool` callback with per-tool counters and latency histograms.
-This is on the roadmap; tracking issue not yet filed.
 
 ## See also
 

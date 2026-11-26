@@ -1,16 +1,40 @@
+---
+type: Guide
+title: Nginx + TLS
+description: An nginx reverse-proxy configuration with Let's Encrypt TLS for mesa-mcp's SSE and Streamable HTTP endpoints, with the buffering and timeout settings streaming responses need.
+tags:
+- deploy
+- nginx
+- tls
+generated:
+  by: claude/opus-5.5
+  at: '2026-11-24T00:00:00Z'
+sources:
+- id: nginx
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/deploy/nginx/mesa-mcp.conf
+  title: Shipped nginx site
+  author: team:idss-mesa
+status: stable
+stale_after: '2027-02-24T00:00:00Z'
+---
+
 # Nginx + TLS
 
 What this page covers: an nginx reverse-proxy config for fronting the
-mesa-mcp SSE transport with TLS via Let's Encrypt. SSE has strict
+mesa-mcp HTTP transport (old-style SSE at `/sse`, Streamable HTTP at
+`/mcp`) with TLS via Let's Encrypt. Streaming responses have strict
 buffering and timeout requirements; the snippets below get them right.
-**The SSE transport is not yet implemented in mesa-mcp** (see
-[HTTP / SSE](./http-sse.md)), so this config is what to deploy when
-the transport lands, not what to deploy today.
+The repository ships a ready site file at
+[`deploy/nginx/mesa-mcp.conf`](https://github.com/idss-mesa/mesa-mcp/blob/main/deploy/nginx/mesa-mcp.conf)
+with an installer, `deploy/install-nginx.sh`; it proxies every path to
+mesa-mcp with buffering off. The block below is an annotated,
+per-route variant.
 
 ## Why a reverse proxy
 
 - TLS termination outside the Python process — keeps mesa-mcp small.
-- A single ingress for `/healthz`, `/sse`, and `/messages/` routes.
+- A single ingress for `/healthz`, `/sse`, `/messages/`, `/mcp` and
+  `/.well-known/oauth-protected-resource`.
 - HTTP/2 + Brotli for the metadata responses; pass-through for the SSE
   stream.
 - Per-IP rate limiting and connection caps without modifying mesa-mcp.
@@ -96,7 +120,29 @@ server {
         proxy_read_timeout 60s;
     }
 
-    # ---- Health probe (planned) ---------------------------------------
+    # ---- Streamable HTTP (claude.ai custom connectors) ----------------
+    location /mcp {
+        proxy_pass         http://mesa_mcp_backend;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Authorization     $http_authorization;
+        proxy_set_header   Connection        "";
+        proxy_buffering    off;
+        proxy_cache        off;
+        proxy_read_timeout 86400s;
+    }
+
+    # ---- RFC 9728 protected-resource metadata (no auth) ---------------
+    location /.well-known/oauth-protected-resource {
+        proxy_pass         http://mesa_mcp_backend;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+
+    # ---- Health probe (no auth) ---------------------------------------
     location = /healthz {
         proxy_pass         http://mesa_mcp_backend;
         proxy_http_version 1.1;

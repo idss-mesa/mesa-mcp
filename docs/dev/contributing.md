@@ -1,3 +1,27 @@
+---
+type: Guide
+title: Contributing
+description: 'How to land a change in mesa-mcp: branch and PR conventions, pre-flight checks, the three Claude Code sub-agents, security rules, and how to edit, validate and publish these OKF docs.'
+tags:
+- contributing
+- pull-requests
+- docs
+generated:
+  by: claude/opus-5.5
+  at: '2026-11-24T00:00:00Z'
+sources:
+- id: agents
+  resource: https://github.com/idss-mesa/mesa-mcp/tree/main/.claude/agents
+  title: Claude Code sub-agents
+  author: team:idss-mesa
+- id: docs-workflow
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/.github/workflows/docs.yml
+  title: Documentation workflow
+  author: team:idss-mesa
+status: stable
+stale_after: '2027-05-24T00:00:00Z'
+---
+
 # Contributing
 
 What this page covers: how to land a change in mesa-mcp — branch
@@ -38,14 +62,9 @@ If anything is red, fix it. CI will reject the PR otherwise.
 Also confirm your tool registered, if you added one:
 
 ```bash
-.venv/bin/python -c "
-import mesa_mcp.server
-import mesa_mcp.ols
-try:
-    import mesa_mcp.irods.tools
-except Exception:
-    pass
-for spec in sorted(mesa_mcp.server.get_registered_tools(), key=lambda s: s.name):
+python -c "
+import mesa_mcp.server as s
+for spec in sorted(s.get_registered_tools(), key=lambda t: t.name):
     print(spec.name)
 "
 ```
@@ -55,17 +74,19 @@ Your tool name should appear in the alphabetical output.
 ## The three Claude Code sub-agents
 
 mesa-mcp ships three Claude Code sub-agents under
-[`.claude/agents/`](../../.claude/agents/) that automate the bulk of
+[`.claude/agents/`](https://github.com/idss-mesa/mesa-mcp/tree/main/.claude/agents) that automate the bulk of
 the porting and review workflow. Each one has a focused remit and a
 detailed playbook. Invoke them from Claude Code with the `Agent` tool.
 
 ### `irods-tool-porter`
 
-[`/.claude/agents/irods-tool-porter.md`](../../.claude/agents/irods-tool-porter.md)
+[`/.claude/agents/irods-tool-porter.md`](https://github.com/idss-mesa/mesa-mcp/blob/main/.claude/agents/irods-tool-porter.md)
 
 Use this agent to port a single MCP tool (or a batch of related ones)
-from the Go reference at
-`/home/exouser/irods-mcp-server/` into mesa-mcp. The agent reads the
+from the Go reference,
+[cyverse/irods-mcp-server](https://github.com/cyverse/irods-mcp-server),
+into mesa-mcp. (The agent's playbook expects a local checkout at a
+path you may need to adjust.) The agent reads the
 matching `irods/<tool>.go` file as the spec and produces:
 
 - A Pydantic input model matching the Go JSON Schema byte-for-byte.
@@ -83,7 +104,7 @@ narrative form.
 
 ### `ols-tool-author`
 
-[`/.claude/agents/ols-tool-author.md`](../../.claude/agents/ols-tool-author.md)
+[`/.claude/agents/ols-tool-author.md`](https://github.com/idss-mesa/mesa-mcp/blob/main/.claude/agents/ols-tool-author.md)
 
 Use this agent for any OBO/OLS / ontology work — porting code from
 `esiil-portal`, authoring `mesa_ols_*` or `mesa_avu_*` tools, debugging
@@ -100,7 +121,7 @@ Invoke it before you hand-edit `ols/client.py` or `ols/transform.py`.
 
 ### `mcp-reviewer`
 
-[`/.claude/agents/mcp-reviewer.md`](../../.claude/agents/mcp-reviewer.md)
+[`/.claude/agents/mcp-reviewer.md`](https://github.com/idss-mesa/mesa-mcp/blob/main/.claude/agents/mcp-reviewer.md)
 
 A **read-only** reviewer. Use this agent before opening any non-trivial
 PR. It produces a structured report covering:
@@ -124,14 +145,43 @@ sections. Address blocking issues before merging.
 
 ## Documentation changes
 
-Documentation lives under `docs/` (you are here). Every doc page opens
-with a "What this page covers" paragraph and ends with a "See also"
-list. Cross-link with relative paths. Keep each page under ~400 lines;
-split if it grows.
+Documentation lives under `docs/` and is published with
+[Zensical](https://zensical.org/) to https://idss-mesa.github.io/mesa-mcp/
+by `.github/workflows/docs.yml`. The source is an Open Knowledge Format
+(OKF v0.2) bundle, so:
 
-Do not auto-generate API docs into this tree — `docs/` is plain
-GitHub-flavored Markdown intended to be read in a browser without a
-build step. There is no `mkdocs.yml`.
+- Every page except `index.md` files and `log.md` starts with YAML
+  frontmatter: `type`, `title`, a one-line `description` (it becomes the
+  page's entry in `llms.txt`, so keep it accurate), `generated: {by, at}`,
+  optional `sources`, and `status` (`draft`, `stable` or `deprecated`).
+- Section `index.md` files carry no frontmatter; the root `docs/index.md`
+  declares only `okf_version` and site keys.
+- New pages go into the `nav` in `zensical.toml`, or they are not built
+  and not listed in `llms.txt`.
+- Record notable documentation changes in `docs/log.md` under a
+  `## YYYY-MM-DD` heading.
+- Link to other pages with relative `.md` paths. Link to source files
+  with full `https://github.com/idss-mesa/mesa-mcp/blob/main/...` URLs:
+  the strict build rejects links that leave `docs/`.
+- `docs/agent-questions.yml` lists questions the published docs must
+  answer. If a change removes an answer, update the page or the question.
+
+Before pushing a docs change (Python 3.11+):
+
+```bash
+pip install zensical pyyaml
+python scripts/okf_validate.py docs           # frontmatter conformance
+python scripts/gen_llms_txt.py                # regenerate docs/llms.txt and llms-full.txt
+zensical build --clean --strict               # must build without warnings
+python scripts/postbuild_agent_surface.py site
+```
+
+Commit the regenerated `docs/llms.txt` and `docs/llms-full.txt`; CI
+fails the pull request when they differ from a fresh run. The scripts in
+`scripts/` (`okf_common.py`, `okf_validate.py`, `gen_llms_txt.py`,
+`postbuild_agent_surface.py`) are shared across idss-mesa sites and read
+everything site-specific from `zensical.toml`; change the config, not
+the scripts. `site/` is build output and is not committed.
 
 ## Security and credentials
 
@@ -142,16 +192,15 @@ build step. There is no `mkdocs.yml`.
 - Token storage (when persistence lands) uses AES-256-GCM with
   scrypt-derived keys — the pattern from `cyverse/terrain-mcp`.
 - Don't introduce new dependencies without discussion. The dependency
-  surface (see [`pyproject.toml`](../../pyproject.toml)) is small on
+  surface (see [`pyproject.toml`](https://github.com/idss-mesa/mesa-mcp/blob/main/pyproject.toml)) is small on
   purpose.
 
 ## Issue triage
 
 Open issues against the
-[cyverse/mesa-mcp](https://github.com/cyverse/mesa-mcp) repo. Tag with
-`ds:*` (iRODS), `ols:*` (OBO/OLS), `mesa:*` (DuckLake), or
-`infra:*` (transport, OIDC, deploy). The roadmap lives in
-[`../../CLAUDE.md`](../../CLAUDE.md).
+[idss-mesa/mesa-mcp](https://github.com/idss-mesa/mesa-mcp/issues) repo.
+The goals and recorded decisions are in
+[CLAUDE.md](https://github.com/idss-mesa/mesa-mcp/blob/main/CLAUDE.md).
 
 ## See also
 
@@ -160,6 +209,6 @@ Open issues against the
 - [Porting from Go](./porting-from-go.md)
 - [OLS internals](./ols-internals.md)
 - [Testing](./testing.md)
-- [`.claude/agents/irods-tool-porter.md`](../../.claude/agents/irods-tool-porter.md)
-- [`.claude/agents/ols-tool-author.md`](../../.claude/agents/ols-tool-author.md)
-- [`.claude/agents/mcp-reviewer.md`](../../.claude/agents/mcp-reviewer.md)
+- [`.claude/agents/irods-tool-porter.md`](https://github.com/idss-mesa/mesa-mcp/blob/main/.claude/agents/irods-tool-porter.md)
+- [`.claude/agents/ols-tool-author.md`](https://github.com/idss-mesa/mesa-mcp/blob/main/.claude/agents/ols-tool-author.md)
+- [`.claude/agents/mcp-reviewer.md`](https://github.com/idss-mesa/mesa-mcp/blob/main/.claude/agents/mcp-reviewer.md)

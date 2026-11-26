@@ -1,3 +1,28 @@
+---
+type: Integration Guide
+title: Connect to a hosted mesa-mcp
+description: Connect Claude Desktop, Claude Code, Cline or Continue (through mcp-remote and a CyVerse Keycloak JWT) or a claude.ai custom connector to a hosted mesa-mcp over HTTP, verify the service with curl, and enroll a project for AVU history.
+tags:
+- hosted
+- http
+- oidc
+- claude.ai
+generated:
+  by: claude/opus-5.5
+  at: '2026-11-24T00:00:00Z'
+sources:
+- id: sse
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/transport/sse.py
+  title: HTTP transport routes and auth middleware
+  author: team:idss-mesa
+- id: wellknown
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/transport/wellknown.py
+  title: RFC 9728 metadata
+  author: team:idss-mesa
+status: stable
+stale_after: '2027-02-24T00:00:00Z'
+---
+
 # Connect to a hosted mesa-mcp
 
 What this page covers: how to point an MCP client (Claude Desktop,

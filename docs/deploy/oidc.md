@@ -1,3 +1,27 @@
+---
+type: Guide
+title: OIDC (CyVerse Keycloak)
+description: Register CyVerse Keycloak OIDC clients for mesa-mcp's HTTP transport, the config values to set, how tokens flow through mesa-mcp, and the request template for CyVerse IAM.
+tags:
+- deploy
+- oidc
+- keycloak
+generated:
+  by: claude/opus-5.5
+  at: '2026-11-24T00:00:00Z'
+sources:
+- id: oidc
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/transport/oidc.py
+  title: OIDC token verification
+  author: team:idss-mesa
+- id: config
+  resource: https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/config.py
+  title: ServerConfig OIDC fields
+  author: team:idss-mesa
+status: stable
+stale_after: '2027-02-24T00:00:00Z'
+---
+
 # OIDC (CyVerse Keycloak)
 
 What this page covers: registering CyVerse Keycloak OIDC clients for
@@ -20,7 +44,7 @@ different OAuth shapes:
 
 | Client | Type | Grant | Purpose |
 | --- | --- | --- | --- |
-| `mesa-mcp` | confidential | `client_credentials` | Backend identity. mesa-mcp uses this to call CyVerse Terrain's `service-account-*` endpoints, and `mcp-remote` bridges use it to mint short-lived JWTs for stdio-only Claude clients. |
+| `mesa-mcp` | confidential | `client_credentials` | Backend identity. `mcp-remote` bridges use it to mint short-lived JWTs for stdio-only Claude clients. mesa-mcp itself only validates inbound JWTs; no code in `src/` calls Terrain. |
 | `mesa-mcp-public` | public, PKCE-required | `authorization_code` | User-delegated browser flow for Claude.ai's custom-connector UI. |
 
 The confidential `mesa-mcp` client is already provisioned. The public
@@ -29,7 +53,7 @@ The confidential `mesa-mcp` client is already provisioned. The public
 ## Config wiring
 
 The relevant fields live in
-[`src/mesa_mcp/config.py::ServerConfig`](../../src/mesa_mcp/config.py):
+[`src/mesa_mcp/config.py::ServerConfig`](https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/config.py):
 
 ```yaml
 server:
@@ -81,11 +105,10 @@ file. Never commit either file.
 | Web origins | Empty. |
 | Access token TTL | 5–15 minutes default; we observed 14400s on the live realm. |
 
-For Terrain service-account calls to work, CyVerse IAM must also
-attach the `service-account-*` realm roles relevant to the endpoints
-you plan to use. See the matching memory note: when adding a tool that
-hits a Terrain `service-account-*` Swagger category, flag the role
-need to the user so they can request it.
+mesa-mcp does not call CyVerse Terrain today. If a future tool calls a
+Terrain `service-account-*` endpoint, CyVerse IAM must also attach the
+matching `service-account-*` realm roles to this client; item 3 of the
+request template below asks for them.
 
 ## Required client settings — public `mesa-mcp-public` (pending)
 
@@ -126,9 +149,9 @@ does not auto-pick it (or use Dynamic Client Registration; see below).
    request-scoped contextvar.
 
 Server-side details of (2) and (5) live in
-[`transport/sse.py`](../../src/mesa_mcp/transport/sse.py),
-[`transport/wellknown.py`](../../src/mesa_mcp/transport/wellknown.py), and
-[`transport/oidc.py`](../../src/mesa_mcp/transport/oidc.py).
+[`transport/sse.py`](https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/transport/sse.py),
+[`transport/wellknown.py`](https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/transport/wellknown.py), and
+[`transport/oidc.py`](https://github.com/idss-mesa/mesa-mcp/blob/main/src/mesa_mcp/transport/oidc.py).
 
 ## Dynamic Client Registration
 
@@ -191,4 +214,4 @@ hostname before sending if you are not on the Jetstream2 instance.
 - [Overview](./overview.md)
 - [Connect to a hosted mesa-mcp](../user/hosted-mcp.md) — client-side recipe.
 - [`../user/configuration.md`](../user/configuration.md)
-- [`../../CLAUDE.md`](../../CLAUDE.md) — Authentication section.
+- [`../../CLAUDE.md`](https://github.com/idss-mesa/mesa-mcp/blob/main/CLAUDE.md) — Authentication section.

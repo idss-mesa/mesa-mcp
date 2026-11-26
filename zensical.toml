@@ -1,0 +1,146 @@
+[project]
+site_name = "mesa-mcp"
+site_url = "https://idss-mesa.github.io/mesa-mcp/"
+site_description = "mesa-mcp is a Model Context Protocol (MCP) server for the CyVerse Data Store (iRODS) that adds ontology-driven AVU metadata from the EMBL-EBI Ontology Lookup Service, DataCite records, and a per-project AVU history kept by mesa-ducklake."
+site_author = "idss-mesa"
+copyright = "Copyright &copy; 2026 The Regents of the University of New Mexico. For AI agents: <a href=\"https://idss-mesa.github.io/mesa-mcp/llms.txt\">llms.txt</a> &middot; <a href=\"https://idss-mesa.github.io/mesa-mcp/llms-full.txt\">llms-full.txt</a> &middot; <a href=\"https://idss-mesa.github.io/mesa-mcp/about/ai-agents/\">agent guide</a>."
+
+repo_url = "https://github.com/idss-mesa/mesa-mcp"
+repo_name = "idss-mesa/mesa-mcp"
+edit_uri = "edit/main/docs/"
+
+# TOML: bare keys attach to the most recent [table] header, so every
+# [project] key, nav included, must stay above the first [project.*] header.
+#
+# docs/README.md and docs/design/README.md are GitHub-only pointers: Zensical
+# drops a README.md that sits next to an index.md, so they are not in the nav.
+nav = [
+  { "Home" = "index.md" },
+  { "Use mesa-mcp" = [
+      "user/index.md",
+      { "Getting started" = "user/getting-started.md" },
+      { "Local install" = "user/local-install.md" },
+      { "VICE app install" = "user/vice-apps.md" },
+      { "Hosted mesa-mcp" = "user/hosted-mcp.md" },
+      { "MCP client wiring" = "user/claude-desktop.md" },
+      { "Configuration" = "user/configuration.md" },
+      { "Tools reference" = "user/tools-reference.md" },
+      { "Metadata workflows" = "user/examples.md" },
+      { "DataCite metadata" = "user/datacite.md" },
+  ] },
+  { "Develop" = [
+      "dev/index.md",
+      { "Architecture" = "dev/architecture.md" },
+      { "DuckLake integration" = "dev/ducklake-integration.md" },
+      { "Adding tools" = "dev/adding-tools.md" },
+      { "Testing" = "dev/testing.md" },
+      { "Contributing" = "dev/contributing.md" },
+      { "Porting from Go" = "dev/porting-from-go.md" },
+      { "OLS internals" = "dev/ols-internals.md" },
+  ] },
+  { "Deploy" = [
+      "deploy/index.md",
+      { "Overview" = "deploy/overview.md" },
+      { "systemd" = "deploy/systemd.md" },
+      { "HTTP / SSE transport" = "deploy/http-sse.md" },
+      { "OIDC" = "deploy/oidc.md" },
+      { "Nginx + TLS" = "deploy/nginx-tls.md" },
+      { "Postgres" = "deploy/postgres.md" },
+      { "Monitoring" = "deploy/monitoring.md" },
+  ] },
+  { "Design records" = [
+      "design/index.md",
+      { "DataCite support (design)" = "design/2026-06-08-datacite-support-design.md" },
+      { "DataCite support (plan)" = "design/plans/2026-06-08-datacite-support.md" },
+  ] },
+  { "About" = [
+      "about/index.md",
+      { "For AI agents" = "about/ai-agents.md" },
+      { "Changelog" = "log.md" },
+  ] },
+]
+
+[project.theme]
+language = "en"
+features = [
+  "announce.dismiss",
+  "content.action.edit",
+  "content.action.view",
+  "content.code.annotate",
+  "content.code.copy",
+  "content.code.select",
+  "content.tabs.link",
+  "content.tooltips",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.instant",
+  "navigation.instant.prefetch",
+  "navigation.path",
+  "navigation.sections",
+  "navigation.tabs",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+  "search.suggest",
+  "toc.follow",
+]
+
+[project.theme.icon]
+repo = "fontawesome/brands/github"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+primary = "green"
+accent = "teal"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+primary = "green"
+accent = "teal"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+
+[project.extra]
+llms_scope = "The documentation covers installing and configuring mesa-mcp (local stdio, CyVerse VICE apps, and a hosted HTTP service behind CyVerse Keycloak), its 52 built-in tools, metadata workflows (AVU search, ontology terms, DataCite, tickets, AVU history and time travel), and how the code is built, tested, and extended."
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/idss-mesa"
+
+[project.markdown_extensions]
+abbr = {}
+admonition = {}
+attr_list = {}
+def_list = {}
+footnotes = {}
+md_in_html = {}
+toc.permalink = true
+pymdownx.betterem = {}
+pymdownx.caret = {}
+pymdownx.details = {}
+pymdownx.emoji.emoji_generator = "zensical.extensions.emoji.to_svg"
+pymdownx.emoji.emoji_index = "zensical.extensions.emoji.twemoji"
+pymdownx.highlight.anchor_linenums = true
+pymdownx.highlight.line_spans = "__span"
+pymdownx.highlight.pygments_lang_class = true
+pymdownx.inlinehilite = {}
+pymdownx.keys = {}
+pymdownx.magiclink = {}
+pymdownx.mark = {}
+pymdownx.smartsymbols = {}
+pymdownx.superfences.custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+pymdownx.tabbed.alternate_style = true
+pymdownx.tabbed.combine_header_slug = true
+pymdownx.tasklist.custom_checkbox = true
+pymdownx.tilde = {}

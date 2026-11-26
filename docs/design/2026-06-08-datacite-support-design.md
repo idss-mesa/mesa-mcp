@@ -1,3 +1,21 @@
+---
+type: Design Record
+title: DataCite support for mesa-mcp (design)
+description: 'Design record approved 2026-06-08 for DataCite descriptive-metadata support: the gap it filled, mirroring the OLS pattern for a metadata standard, the schema, transform and tool components, validation and tests.'
+tags:
+- design
+- datacite
+generated:
+  by: claude/opus-5.5
+  at: '2026-11-24T00:00:00Z'
+sources:
+- id: datacite
+  resource: https://github.com/idss-mesa/mesa-mcp/tree/main/src/mesa_mcp/datacite
+  title: Implemented datacite package
+  author: team:idss-mesa
+status: stable
+---
+
 # DataCite (descriptive-metadata) support for mesa-mcp — design spec
 
 - **Status:** Approved (design)
